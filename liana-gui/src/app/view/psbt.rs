@@ -316,6 +316,10 @@ pub fn spend_header<'a>(
         .into()
 }
 
+pub fn payjoin_send_success_view<'a>() -> Element<'a, Message> {
+    card::simple(text("Payjoin sent successfully")).into()
+}
+
 pub fn spend_overview_view<'a>(
     tx: &'a SpendTx,
     desc_info: &'a LianaPolicy,
@@ -354,6 +358,22 @@ pub fn spend_overview_view<'a>(
                                     )
                                     .align_y(Alignment::Center),
                             )
+                             .push_maybe(if let Some(bip21) = tx.bip21.clone() {
+                                Some(
+                                    Row::new()
+                                        .push(p2_regular(bip21.to_string()).style(theme::text::secondary))
+                                        .push(
+                                            Button::new(
+                                                icon::clipboard_icon().style(theme::text::secondary),
+                                            )
+                                            .on_press(Message::Clipboard(bip21.to_string()))
+                                            .style(theme::button::transparent_border),
+                                        )
+                                        .align_y(Alignment::Center),
+                                )
+                            } else {
+                                None
+                            })
                             .push(
                                 Row::new()
                                     .push(p1_bold("Tx ID").width(Length::Fill))
@@ -393,6 +413,15 @@ pub fn spend_overview_view<'a>(
                                 .on_press(Message::Spend(SpendTxMessage::Broadcast))
                                 .width(Length::Fixed(150.0)),
                         )
+                    })
+                    .push_maybe(if tx.path_ready().is_some() {
+                        Some(
+                            button::secondary(None, "Send Payjoin")
+                                .on_press(Message::Spend(SpendTxMessage::SendPayjoin))
+                                .width(Length::Fixed(150.0)),
+                        )
+                    } else {
+                        None
                     })
                     .align_y(Alignment::Center)
                     .spacing(20),

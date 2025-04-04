@@ -59,6 +59,7 @@ pub enum PsbtAction {
     Update(UpdateAction),
     Broadcast(BroadcastAction),
     Delete(DeleteAction),
+    SendPayjoin(SendPayjoinAction),
 }
 
 impl<'a> AsRef<dyn Action + 'a> for PsbtAction {
@@ -69,6 +70,7 @@ impl<'a> AsRef<dyn Action + 'a> for PsbtAction {
             Self::Update(a) => a,
             Self::Broadcast(a) => a,
             Self::Delete(a) => a,
+            Self::SendPayjoin(a) => a,
         }
     }
 }
@@ -81,6 +83,7 @@ impl<'a> AsMut<dyn Action + 'a> for PsbtAction {
             Self::Update(a) => a,
             Self::Broadcast(a) => a,
             Self::Delete(a) => a,
+            Self::SendPayjoin(a) => a,
         }
     }
 }
@@ -145,6 +148,16 @@ impl PsbtState {
             }
             Message::View(view::Message::Spend(view::SpendTxMessage::Delete)) => {
                 self.action = Some(PsbtAction::Delete(DeleteAction::default()));
+            }
+            Message::View(view::Message::Spend(view::SpendTxMessage::SendPayjoin)) => {
+                let action = SendPayjoinAction::new();
+                let cmd = action.load(daemon);
+                self.action = Some(PsbtAction::SendPayjoin(action));
+                return cmd;
+            }
+            Message::View(view::Message::Spend(view::SpendTxMessage::PayjoinInitiated)) => {
+                self.tx.status = SpendStatus::PayjoinInitiated;
+                self.action = None;
             }
             Message::View(view::Message::Spend(view::SpendTxMessage::Sign)) => {
                 if let Some(PsbtAction::Sign(SignAction { display_modal, .. })) = &mut self.action {
@@ -400,6 +413,27 @@ impl Action for DeleteAction {
         )
         .on_blur(Some(view::Message::Spend(view::SpendTxMessage::Cancel)))
         .into()
+    }
+}
+
+pub struct SendPayjoinAction {
+    _error: Option<Error>,
+}
+
+impl SendPayjoinAction {
+    pub fn new() -> Self {
+        Self { _error: None }
+    }
+}
+
+impl Action for SendPayjoinAction {
+    fn view<'a>(&'a self, content: Element<'a, view::Message>) -> Element<'a, view::Message> {
+        modal::Modal::new(content, view::psbt::payjoin_send_success_view())
+            // On blur, show the psbts view
+            .on_blur(Some(view::Message::Spend(
+                view::SpendTxMessage::PayjoinInitiated,
+            )))
+            .into()
     }
 }
 

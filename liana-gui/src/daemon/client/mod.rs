@@ -75,6 +75,12 @@ impl<C: Client + Send + Sync + Debug> Daemon for Lianad<C> {
         ))
     }
 
+    async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError> {
+        // TODO: do this if we use lianad
+        // self.call("sendpayjoin", Some(vec![json!(bip21), json!(psbt)]))
+        unimplemented!()
+    }
+
     async fn get_info(&self) -> Result<GetInfoResult, DaemonError> {
         self.call("getinfo", Option::<Request>::None)
     }

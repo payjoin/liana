@@ -1,9 +1,5 @@
 use std::{
-    cmp::Ordering,
-    collections::{HashMap, HashSet},
-    iter::FromIterator,
-    str::FromStr,
-    sync::Arc,
+    cmp::Ordering, collections::{HashMap, HashSet}, convert::TryFrom, iter::FromIterator, str::FromStr, sync::Arc
 };
 
 use iced::{Subscription, Task};
@@ -25,6 +21,8 @@ use crate::{
         Daemon,
     },
 };
+
+use payjoin::Uri;
 
 /// See: https://github.com/wizardsardine/liana/blob/master/src/commands/mod.rs#L32
 const DUST_OUTPUT_SATS: u64 = 5_000;
@@ -189,6 +187,21 @@ impl DefineSpend {
         false
     }
 
+    fn bip21_valid(&mut self) -> bool {
+        for recipient in self.recipients.iter_mut() {
+            if recipient.bip21.value.is_empty() {
+                return true;
+            }
+            if let Err(_e) = Uri::try_from(recipient.bip21.value.as_str()) {
+                recipient.bip21.valid = false;
+                return false;
+            } else {
+                recipient.bip21.valid = true;
+            }
+        }
+        true
+    }
+
     fn check_valid(&mut self) {
         self.is_valid =
             self.form_values_are_valid(false) && self.coins.iter().any(|(_, selected)| *selected);
@@ -200,6 +213,7 @@ impl DefineSpend {
         if !self.form_values_are_valid(true)
             || self.exists_duplicate()
             || self.recipients.is_empty()
+            || !self.bip21_valid()
         {
             // The current form details are not valid to draft a spend, so remove any previously
             // calculated amount as it will no longer be valid and could be misleading, e.g. if
@@ -444,6 +458,11 @@ impl Step for DefineSpend {
                             }
                         }
                     }
+                    view::CreateSpendMessage::Bip21Edited(i, bip21) => {
+                        self.recipients.get_mut(i).unwrap().bip21.value = bip21;
+                        tracing::info!(">>>>> bip21: {:?}", self.recipients.get_mut(i).unwrap().bip21.value);
+
+                    }
                     view::CreateSpendMessage::RecipientEdited(i, _, _) => {
                         self.recipients
                             .get_mut(i)
@@ -656,6 +675,7 @@ struct Recipient {
     label: form::Value<String>,
     address: form::Value<String>,
     amount: form::Value<String>,
+    bip21: form::Value<String>,
 }
 
 impl Recipient {
@@ -726,12 +746,17 @@ impl Recipient {
                 self.label.valid = label.len() <= 100;
                 self.label.value = label;
             }
+            view::CreateSpendMessage::Bip21Edited(_, bip21) => {
+                log::info!("bip21: {}", bip21);
+                self.bip21.value = bip21;
+            }
+
             _ => {}
         };
     }
 
     fn view(&self, i: usize, is_max_selected: bool) -> Element<view::CreateSpendMessage> {
-        view::spend::recipient_view(i, &self.address, &self.amount, &self.label, is_max_selected)
+        view::spend::recipient_view(i, &self.address, &self.amount, &self.label, is_max_selected, &self.bip21)
     }
 }
 
@@ -753,6 +778,10 @@ impl SaveSpend {
 
 impl Step for SaveSpend {
     fn load(&mut self, draft: &TransactionDraft) {
+        let recipients = draft.recipients.clone();
+        let bip21 = recipients.get(0).unwrap().bip21.value.clone();
+        tracing::info!("bip21: {:?}", bip21);
+
         let (psbt, warnings) = draft.generated.clone().unwrap();
         let mut tx = SpendTx::new(
             None,
@@ -761,6 +790,7 @@ impl Step for SaveSpend {
             &self.wallet.main_descriptor,
             &self.curve,
             draft.network,
+            Some(bip21),
         );
         tx.labels.clone_from(&draft.labels);
 

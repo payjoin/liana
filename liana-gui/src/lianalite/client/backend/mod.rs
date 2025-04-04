@@ -518,6 +518,10 @@ impl Daemon for BackendWalletClient {
         None
     }
 
+    async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError> {
+        unimplemented!()
+    }
+
     /// refresh the token if close to expiration.
     async fn is_alive(&self, datadir: &Path, network: Network) -> Result<(), DaemonError> {
         let auth = self.auth().await;
@@ -1248,6 +1252,8 @@ fn spend_tx_from_api(
         desc,
         secp,
         network,
+        // TODO: BIP21 loaded from the backend will always be ignored
+        None,
     );
     tx.load_labels(&labels);
     tx

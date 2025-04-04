@@ -67,6 +67,10 @@ impl Daemon for EmbeddedDaemon {
         Some(&self.config)
     }
 
+    async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError> {
+        unimplemented!()
+    }
+
     async fn is_alive(&self, _datadir: &Path, _network: Network) -> Result<(), DaemonError> {
         let mut handle = self.handle.lock().await;
         if let Some(h) = handle.as_ref() {

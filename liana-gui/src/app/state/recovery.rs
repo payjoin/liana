@@ -175,6 +175,9 @@ impl State for RecoveryPanel {
                                 &desc,
                                 &secp256k1::Secp256k1::verification_only(),
                                 network,
+                                // TODO: BIP21 loaded from the backend will always be ignored
+                                // because it is not part of the `ListSpendEntry`
+                                None,
                             ))
                         },
                         Message::Recovery,
