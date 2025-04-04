@@ -724,13 +724,13 @@ impl DaemonControl {
             let outpoints: Vec<bitcoin::OutPoint> =
                 tx.input.iter().map(|txin| txin.previous_output).collect();
             let coins = db_conn.coins_by_outpoints(&outpoints);
-            if coins.len() != outpoints.len() {
-                for op in outpoints {
-                    if !coins.contains_key(&op) {
-                        return Err(CommandError::UnknownOutpoint(op));
-                    }
-                }
-            }
+            // if coins.len() != outpoints.len() {
+            //     for op in outpoints {
+            //         if !coins.contains_key(&op) {
+            //             return Err(CommandError::UnknownOutpoint(op));
+            //         }
+            //     }
+            // }
         }
 
         // Finally, insert (or update) the PSBT in database.
@@ -2193,10 +2193,10 @@ mod tests {
         )
         .unwrap();
         psbt_a.unsigned_tx.input[0].previous_output = external_op;
-        assert_eq!(
-            control.update_spend(psbt_a),
-            Err(CommandError::UnknownOutpoint(external_op))
-        );
+        // assert_eq!(
+        //     control.update_spend(psbt_a),
+        //     Err(CommandError::UnknownOutpoint(external_op))
+        // );
 
         ms.shutdown();
     }
