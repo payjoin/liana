@@ -158,6 +158,20 @@ impl PsbtState {
             Message::View(view::Message::Spend(view::SpendTxMessage::PayjoinInitiated)) => {
                 self.tx.status = SpendStatus::PayjoinInitiated;
                 self.action = None;
+
+                if let Some(bip21) = self.tx.bip21.clone() {
+                    // TODO: remove clone
+                    let psbt = self.tx.psbt.clone();
+                    return Task::perform(
+                        async move {
+                            daemon
+                                .send_payjoin(bip21.clone(), &psbt)
+                                .await
+                                .map_err(|e| e.into())
+                        },
+                        Message::SendPayjoin,
+                    );
+                }
             }
             Message::View(view::Message::Spend(view::SpendTxMessage::Sign)) => {
                 if let Some(PsbtAction::Sign(SignAction { display_modal, .. })) = &mut self.action {
