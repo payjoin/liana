@@ -52,6 +52,8 @@ reqwest = { version = "0.11", default-features=false, features = ["json", "rustl
 rust-ini = "0.19.0"
 rfd = "0.15.1"
 
+# payjoin
+payjoin = { git = "https://github.com/0xBEEFCAF3/rust-payjoin.git", rev = "a90944a2cc0e3be0730e09ff370369406221a8a4", features = ["v2", "io"]}
 
 [target.'cfg(windows)'.dependencies]
 zip = { version = "0.6", default-features=false, features = ["bzip2", "deflate"] }
