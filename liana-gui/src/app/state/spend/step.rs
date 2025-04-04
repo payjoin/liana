@@ -1,5 +1,10 @@
 use std::{
-    cmp::Ordering, collections::{HashMap, HashSet}, convert::TryFrom, iter::FromIterator, str::FromStr, sync::Arc
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    iter::FromIterator,
+    str::FromStr,
+    sync::Arc,
 };
 
 use iced::{Subscription, Task};
@@ -459,9 +464,23 @@ impl Step for DefineSpend {
                         }
                     }
                     view::CreateSpendMessage::Bip21Edited(i, bip21) => {
-                        self.recipients.get_mut(i).unwrap().bip21.value = bip21;
-                        tracing::info!(">>>>> bip21: {:?}", self.recipients.get_mut(i).unwrap().bip21.value);
+                        self.recipients.get_mut(i).unwrap().bip21.value = bip21.clone();
+                        if let Ok(uri) = Uri::try_from(bip21.as_str()) {
+                            tracing::info!(">>>>> bip21: {:?}", uri);
+                            if let Ok(address) = uri.address.require_network(cache.network) {
+                                self.recipients.get_mut(i).unwrap().address.value =
+                                    address.to_string();
+                            }
+                            if let Some(amount) = uri.amount {
+                                self.recipients.get_mut(i).unwrap().amount.value =
+                                    amount.to_string_in(Denomination::Bitcoin);
+                            }
+                        }
 
+                        tracing::info!(
+                            ">>>>> bip21: {:?}",
+                            self.recipients.get_mut(i).unwrap().bip21.value
+                        );
                     }
                     view::CreateSpendMessage::RecipientEdited(i, _, _) => {
                         self.recipients
@@ -756,7 +775,14 @@ impl Recipient {
     }
 
     fn view(&self, i: usize, is_max_selected: bool) -> Element<view::CreateSpendMessage> {
-        view::spend::recipient_view(i, &self.address, &self.amount, &self.label, is_max_selected, &self.bip21)
+        view::spend::recipient_view(
+            i,
+            &self.address,
+            &self.amount,
+            &self.label,
+            is_max_selected,
+            &self.bip21,
+        )
     }
 }
 
