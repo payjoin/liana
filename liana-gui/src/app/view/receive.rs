@@ -23,8 +23,6 @@ use liana_ui::{
     widget::*,
 };
 
-use payjoin::{persist::NoopPersister, OhttpKeys, Url};
-
 use crate::{
     app::{
         error::Error,
@@ -35,15 +33,9 @@ use crate::{
 
 use super::message::Message;
 
-pub struct PayjoinSpecs {
-    pub directory: Url,
-    pub ohttp_relay: Url,
-    pub ohttp_keys: OhttpKeys,
-}
-
 pub fn receive<'a>(
     addresses: &'a [bitcoin::Address],
-    payjoin_specs: &PayjoinSpecs,
+    payjoin_uris: &'a HashMap<String, String>,
     labels: &'a HashMap<String, String>,
     labels_editing: &'a HashMap<String, form::Value<String>>,
 ) -> Element<'a, Message> {
@@ -65,26 +57,7 @@ pub fn receive<'a>(
                     Column::new().spacing(10).width(Length::Fill),
                     |col, (i, address)| {
                         let addr = address.to_string();
-
-                        let pj_receiver = payjoin::receive::v2::NewReceiver::new(
-                            address.clone(),
-                            payjoin_specs.directory.clone(),
-                            payjoin_specs.ohttp_keys.clone(),
-                            Some(std::time::Duration::from_secs(600)),
-                        )
-                        .unwrap();
-
-                        let storage_token = pj_receiver.persist(&mut NoopPersister).unwrap();
-                        let receiver =
-                            payjoin::receive::v2::Receiver::load(storage_token, &mut NoopPersister)
-                                .unwrap();
-
-                        let pj_uri = receiver.pj_uri();
-                        // let mut pj_uri = receiver.pj_uri();
-                        // pj_uri.amount = Some(Amount::from_btc(0.001).unwrap());
-
-                        let payjoin_uri = pj_uri.to_string();
-
+                        let payjoin_uri = payjoin_uris.get(&addr).unwrap();
                         col.push(
                             card::simple(
                                 Column::new()
@@ -185,6 +158,11 @@ pub fn receive<'a>(
                                                 .on_press(Message::Select(i)),
                                             )
                                             .push(Space::with_width(Length::Fill))
+                                            .push(
+                                                button::secondary(None, "Payjoin")
+                                                    .on_press(Message::ReceivePayjoin(payjoin_uri.clone())),
+                                            )
+                                            .spacing(10)
                                             .push(
                                                 button::secondary(None, "Show QR Code")
                                                     .on_press(Message::ShowQrCode(i)),

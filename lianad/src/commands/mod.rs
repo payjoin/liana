@@ -22,17 +22,15 @@ use liana::{
     },
 };
 
+use payjoin::{persist::NoopPersister, OhttpKeys, Url};
+
 use utils::{
     deser_addr_assume_checked, deser_amount_from_sats, deser_fromstr, deser_hex, ser_amount,
     ser_hex, ser_to_string,
 };
 
 use std::{
-    collections::{hash_map, HashMap, HashSet},
-    convert::TryInto,
-    fmt,
-    sync::{self, mpsc},
-    time::SystemTime,
+    collections::{hash_map, HashMap, HashSet}, convert::TryInto, fmt, sync::{self, mpsc}, time::SystemTime
 };
 
 use miniscript::{
@@ -363,7 +361,40 @@ impl DaemonControl {
             .receive_descriptor()
             .derive(new_index, &self.secp)
             .address(self.config.bitcoin_config.network);
-        GetAddressResult::new(address, new_index)
+        // TODO: Too deep
+        GetAddressResult::new(address, new_index, "".to_string())
+    }
+
+    pub fn receive_payjoin(&self, directory: Url, ohttp_keys: OhttpKeys) -> GetAddressResult {
+        let mut db_conn = self.db.connection();
+        let index = db_conn.receive_index();
+        let new_index = index
+            .increment()
+            .expect("Can't get into hardened territory");
+        db_conn.set_receive_index(new_index, &self.secp);
+        let address = self
+            .config
+            .main_descriptor
+            .receive_descriptor()
+            .derive(new_index, &self.secp)
+            .address(self.config.bitcoin_config.network);
+
+        let pj_receiver = payjoin::receive::v2::NewReceiver::new(
+            address.clone(),
+            directory.clone(),
+            ohttp_keys.clone(),
+            Some(std::time::Duration::from_secs(600)),
+        )
+        .unwrap();
+
+        let storage_token = pj_receiver.persist(&mut NoopPersister).unwrap();
+        let receiver =
+            payjoin::receive::v2::Receiver::load(storage_token, &mut NoopPersister)
+                .unwrap();
+
+        let payjoin_uri = receiver.pj_uri().to_string();
+
+        GetAddressResult::new(address, new_index, payjoin_uri)
     }
 
     /// Update derivation indexes
@@ -1260,13 +1291,15 @@ pub struct GetAddressResult {
     #[serde(deserialize_with = "deser_addr_assume_checked")]
     pub address: bitcoin::Address,
     pub derivation_index: bip32::ChildNumber,
+    pub payjoin_uri: String,
 }
 
 impl GetAddressResult {
-    pub fn new(address: bitcoin::Address, derivation_index: bip32::ChildNumber) -> Self {
+    pub fn new(address: bitcoin::Address, derivation_index: bip32::ChildNumber, payjoin_uri: String) -> Self {
         Self {
             address,
             derivation_index,
+            payjoin_uri,
         }
     }
 }

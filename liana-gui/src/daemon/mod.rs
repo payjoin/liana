@@ -21,6 +21,7 @@ use lianad::{
     config::Config,
     StartupError,
 };
+use payjoin::{OhttpKeys, Url};
 
 use crate::{hw::HardwareWalletConfig, node};
 
@@ -101,6 +102,7 @@ pub trait Daemon: Debug {
     async fn stop(&self) -> Result<(), DaemonError>;
     async fn get_info(&self) -> Result<model::GetInfoResult, DaemonError>;
     async fn get_new_address(&self) -> Result<model::GetAddressResult, DaemonError>;
+    async fn receive_payjoin(&self, directory: Url, ohttp_keys: OhttpKeys) -> Result<model::GetAddressResult, DaemonError>;
     async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError>;
     async fn update_deriv_indexes(
         &self,
