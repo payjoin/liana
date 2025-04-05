@@ -337,6 +337,17 @@ impl DaemonControl {
         }
     }
 
+    /// Initate a payjoin sender
+    pub fn init_payjoin_sender(&self, bip21: String, psbt: &Psbt) -> Result<(), CommandError> {
+        let mut db_conn = self.db.connection();
+        // Get spend id from psbt
+        let txid = psbt.clone().extract_tx().unwrap().compute_txid();
+        // let spend_id = db_conn.spend_tx(&txid).ok_or(CommandError::UnknownSpend(txid))?;
+        db_conn.create_payjoin_sender(bip21, txid);
+
+        Ok(())
+    }
+
     /// Get a new deposit address. This will always generate a new deposit address, regardless of
     /// whether it was actually used.
     pub fn get_new_address(&self) -> GetAddressResult {

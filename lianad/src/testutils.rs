@@ -154,6 +154,7 @@ struct DummyDbState {
     timestamp: u32,
     rescan_timestamp: Option<u32>,
     last_poll_timestamp: Option<u32>,
+    payjoin_senders: HashMap<bitcoin::Txid, String>,
 }
 
 pub struct DummyDatabase {
@@ -188,6 +189,7 @@ impl DummyDatabase {
                 timestamp: now,
                 rescan_timestamp: None,
                 last_poll_timestamp: None,
+                payjoin_senders: HashMap::new(),
             })),
         }
     }
@@ -200,6 +202,12 @@ impl DummyDatabase {
 }
 
 impl DatabaseConnection for DummyDatabase {
+
+    fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
+        self.db.write().unwrap().payjoin_senders.insert(spend_tx_id, bip21);
+    }
+    
+
     fn network(&mut self) -> bitcoin::Network {
         bitcoin::Network::Bitcoin
     }

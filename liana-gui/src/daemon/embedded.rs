@@ -68,7 +68,11 @@ impl Daemon for EmbeddedDaemon {
     }
 
     async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError> {
-        unimplemented!()
+        self.command(|daemon| {
+            daemon.init_payjoin_sender(bip21, psbt)
+                .map_err(|e| DaemonError::Unexpected(e.to_string()))
+        })
+        .await
     }
 
     async fn is_alive(&self, _datadir: &Path, _network: Network) -> Result<(), DaemonError> {

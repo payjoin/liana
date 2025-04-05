@@ -194,6 +194,9 @@ pub trait DatabaseConnection {
 
     /// Dump all labels
     fn get_labels_bip329(&mut self, offset: u32, limit: u32) -> Labels;
+
+    /// Create a payjoin sender
+    fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid);
 }
 
 impl DatabaseConnection for SqliteConn {
@@ -415,6 +418,10 @@ impl DatabaseConnection for SqliteConn {
                 )
             })
             .collect()
+    }
+
+    fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
+        self.create_payjoin_sender(bip21, spend_tx_id)
     }
 }
 

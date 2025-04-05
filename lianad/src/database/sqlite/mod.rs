@@ -963,6 +963,18 @@ impl SqliteConn {
         })
         .expect("Db must not fail");
     }
+
+    /// Create a payjoin sender
+    pub fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "INSERT INTO payjoin_senders (bip21, spend_tx_id) VALUES (?1, ?2)",
+                rusqlite::params![bip21, spend_tx_id[..].to_vec()],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
 }
 
 #[cfg(test)]
@@ -1219,6 +1231,14 @@ CREATE TABLE labels (
     item TEXT UNIQUE NOT NULL,
     value TEXT NOT NULL
 );
+
+/* Payjoin senders */
+CREATE TABLE payjoin_senders (
+    id INTEGER PRIMARY KEY NOT NULL,
+    bip21 TEXT NOT NULL,
+    spend_tx_id INTEGER NOT NULL
+);
+
 ";
 
     fn psbt_from_str(psbt_str: &str) -> Psbt {
@@ -1248,6 +1268,17 @@ CREATE TABLE labels (
         let db = SqliteDb::new(db_path, Some(options.clone()), &secp).unwrap();
 
         (tmp_dir, options, secp, db)
+    }
+
+    #[test]
+    fn can_store_payjoin_sender() {
+        let (tmp_dir, options, _, db) = dummy_db();
+        let mut conn = db.connection().unwrap();
+        let txid = bitcoin::Txid::from_str("0c62a990d20d54429e70859292e82374ba6b1b951a3ab60f26bb65fee5724ff7").unwrap();
+        conn.create_payjoin_sender("bip21".to_string(), txid);
+        // let payjoin_sender = conn.db_payjoin_sender();
+        // assert_eq!(payjoin_sender.bip21, "bip21");
+        // assert_eq!(payjoin_sender.spend_tx_id, txid);
     }
 
     // All values required to store a coin in the V3 schema DB (including `id` column).
