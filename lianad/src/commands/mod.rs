@@ -22,6 +22,8 @@ use liana::{
     },
 };
 
+use log::info;
+use payjoin::bitcoin::Witness;
 use payjoin::{persist::NoopPersister, OhttpKeys, Url};
 
 use utils::{
@@ -30,7 +32,11 @@ use utils::{
 };
 
 use std::{
-    collections::{hash_map, HashMap, HashSet}, convert::TryInto, fmt, sync::{self, mpsc}, time::SystemTime
+    collections::{hash_map, HashMap, HashSet},
+    convert::TryInto,
+    fmt,
+    sync::{self, mpsc},
+    time::SystemTime,
 };
 
 use miniscript::{
@@ -833,6 +839,55 @@ impl DaemonControl {
         db_conn.delete_spend(txid);
     }
 
+    /// Hack: The following will only satisfy simple inheritance p2wsh miniscript descriptors.
+    /// This is what hackathons are all about. Freaking out and writing a bespoke psbt finalizer.
+    fn finalize_psbt(&self, mut psbt: Psbt) -> Psbt {
+        for input in psbt.inputs.iter_mut() {
+            if input.final_script_sig.is_some() || input.final_script_witness.is_some() {
+                continue;
+            }
+
+            let bip32 = input
+                .bip32_derivation
+                .values()
+                .map(|bip32| bip32.clone().1)
+                .collect::<Vec<_>>();
+            // Need to get the index of the pk of the main spending path which s derived at m/48'/1'/0'/2'/1/X
+            // The recovery key is derived at m/48'/1'/0'/2'/3/X
+            let main_spending_path = bip32
+                .iter()
+                .position(|bip32| bip32.to_u32_vec().get(4) == Some(&1))
+                .unwrap();
+            let _recovery_path = bip32
+                .iter()
+                .position(|bip32| bip32.to_u32_vec().get(4) == Some(&3))
+                .unwrap();
+
+            let sigs = input
+                .partial_sigs
+                .values()
+                .map(|sig| sig)
+                .collect::<Vec<_>>();
+            let sig_pk = sigs.get(main_spending_path).unwrap();
+
+            let witness_script = input
+                .witness_script
+                .as_ref()
+                .expect("p2wsh should always have witness script");
+            info!("witness_script: {}", witness_script.to_asm_string());
+
+            let mut witness: Witness = Witness::new();
+            witness.push_ecdsa_signature(sig_pk);
+            // let input_xpub = input.bip32_derivation.keys().next().unwrap();
+            // witness.push(sig_pk.0.inner.serialize());
+            witness.push(witness_script);
+
+            input.final_script_witness = Some(witness);
+        }
+
+        psbt
+    }
+
     /// Finalize and broadcast this stored Spend transaction.
     pub fn broadcast_spend(&self, txid: &bitcoin::Txid) -> Result<(), CommandError> {
         let mut db_conn = self.db.connection();
@@ -842,14 +897,22 @@ impl DaemonControl {
         let mut spend_psbt = db_conn
             .spend_tx(txid)
             .ok_or(CommandError::UnknownSpend(*txid))?;
-        spend_psbt.finalize_mut(&self.secp).map_err(|e| {
-            CommandError::SpendFinalization(
-                e.into_iter()
-                    .next()
-                    .map(|e| e.to_string())
-                    .unwrap_or_default(),
-            )
-        })?;
+
+        // let wallet = db_conn.wallet();
+
+        // spend_info.
+
+        // spend_psbt.finalize_mut(&self.secp).map_err(|e| {
+        //     CommandError::SpendFinalization(
+        //         e.into_iter()
+        //             .next()
+        //             .map(|e| e.to_string())
+        //             .unwrap_or_default(),
+        //     )
+        // })?;
+        spend_psbt = self.finalize_psbt(spend_psbt);
+        let psbt_str = spend_psbt.to_string();
+        println!(">>>>> FINAL {}", psbt_str);
 
         // Then, broadcast it (or try to, we never know if we are not going to hit an
         // error at broadcast time).

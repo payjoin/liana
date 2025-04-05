@@ -8,6 +8,7 @@ use liana::{
     },
     signer::HotSigner,
 };
+use log::info;
 
 pub struct Signer {
     curve: secp256k1::Secp256k1<secp256k1::All>,
@@ -53,7 +54,11 @@ impl Signer {
     }
 
     pub fn sign_psbt(&self, psbt: Psbt) -> Result<Psbt, SignerError> {
-        self.key.sign_psbt(psbt, &self.curve)
+        let psbt = self.key.sign_psbt(psbt, &self.curve).expect("Failed to sign psbt");
+        // TODO: remove later, for debugging
+        let psbt_string = psbt.to_string();
+        info!("<<<<<< Signed PSBT: {:?}", psbt_string);
+        Ok(psbt)
     }
 
     pub fn store(

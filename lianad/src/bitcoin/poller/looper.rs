@@ -11,12 +11,15 @@ use std::{
 };
 
 use liana::descriptors;
-use log::info;
-use miniscript::{bitcoin::{self, secp256k1}, psbt::PsbtExt};
+use log::{info, warn};
+use miniscript::{
+    bitcoin::{self, secp256k1},
+    psbt::PsbtExt,
+};
 use payjoin::{
     bitcoin::FeeRate,
     persist::NoopPersister,
-    send::v2::{NewSender, Sender, SenderBuilder},
+    send::v2::{Sender, SenderBuilder},
     Uri, UriExt, Url,
 };
 
@@ -422,7 +425,10 @@ fn post_request(req: payjoin::Request) -> reqwest::blocking::Response {
         .expect("Failed to send request")
 }
 
-fn payjoin_sender_check(db_conn: &mut Box<dyn DatabaseConnection>, secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>) {
+fn payjoin_sender_check(
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) {
     let payjoin_senders = db_conn.get_all_payjoin_senders();
     for (bip21, txid, _) in payjoin_senders {
         info!("Payjoin sender: {}", bip21);
@@ -432,7 +438,22 @@ fn payjoin_sender_check(db_conn: &mut Box<dyn DatabaseConnection>, secp: &secp25
             .assume_checked()
             .check_pj_supported()
             .expect("Invalid PJ BIP21");
-        psbt.finalize_mut(secp).expect("finalize should work");
+
+        // Clone the psbt to finalize, and copy over the witness,
+        // this is bc finalize mut will remove those fields and we need them again when we sign the pj psbt
+        let mut psbt_to_finalize = psbt.clone();
+        psbt_to_finalize.finalize_mut(secp).expect("finalize should work");
+
+        for (i, input) in psbt_to_finalize.inputs.iter_mut().enumerate() {
+            psbt.inputs[i].final_script_sig = input.final_script_sig.clone();
+            psbt.inputs[i].final_script_witness = input.final_script_witness.clone();
+        }
+
+        // TODO: remove later, for debugging
+        let psbt_string = psbt.to_string();
+        info!("<<<<<< PSBT being sent to receiver: {:?}", psbt_string);
+
+        
         let new_sender = SenderBuilder::new(psbt, pj_uri)
             .build_recommended(FeeRate::BROADCAST_MIN)
             .expect("Failed to build sender");
@@ -443,21 +464,46 @@ fn payjoin_sender_check(db_conn: &mut Box<dyn DatabaseConnection>, secp: &secp25
         let sender =
             Sender::load(sender_storage_token, &NoopPersister).expect("Failed to load sender");
 
-        let url = Url::from_str(OHTTP_RELAY).expect("Invalid OHTTP relay");
-        let (get_req, ohttp_ctx) = sender.extract_v2(url).expect("Failed to extract v2");
-        let resp = post_request(get_req);
-        let res = ohttp_ctx
+        let ohttp_url = Url::from_str(OHTTP_RELAY).expect("Invalid OHTTP relay");
+        let (post_req, post_ctx) = sender.extract_v2(ohttp_url).expect("Failed to extract v2");
+        // Send original PSBT to the receiver via the BIP77 directory
+        let resp = post_request(post_req);
+        let get_ctx = post_ctx
             .process_response(resp.bytes().expect("Failed to read response").as_ref())
             .expect("Failed to process response");
 
-        info!("Payjoin sender response: {:?}", res);
+        info!("Payjoin sender response: {:?}", get_ctx);
+        // Read the response from the receiver via the BIP77 directory
+        let (get_req, ohttp_ctx) = get_ctx
+            .extract_req(OHTTP_RELAY)
+            .expect("Failed to extract get request");
+        let resp = post_request(get_req);
+        let psbt = match get_ctx.process_response(
+            resp.bytes().expect("Failed to read response").as_ref(),
+            ohttp_ctx,
+        ) {
+            Ok(Some(psbt)) => {
+                psbt
+            }
+            Ok(None) => {
+                // nothing to do yet, no response
+                continue;
+            }
+            Err(e) => {
+                warn!("Failed to process payjoin sender response: {:?}", e);
+                // TODO: handle error
+                continue;
+            }
+        };
+        // Store updated Payjoin psbt 
+        db_conn.store_spend(&psbt);
+        info!("Updated Payjoin psbt for txid: {}", txid);
 
         // Mark the sender as completed
         db_conn.update_payjoin_sender_status(txid, PayjoinSenderStatus::Completed);
 
         // TODO: check if the response is valid, and if so, update the psbt for this spend tx.
         // USer will need to sign again
-
     }
 }
 

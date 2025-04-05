@@ -130,6 +130,13 @@ CREATE TABLE payjoin_senders (
     spend_tx_id BLOB UNIQUE NOT NULL,
     status INTEGER NOT NULL CHECK (status IN (0,1,2))
 );
+
+/* Payjoin receivers */
+CREATE TABLE payjoin_receivers (
+    id INTEGER PRIMARY KEY NOT NULL,
+    address TEXT NOT NULL,
+    status INTEGER NOT NULL CHECK (status IN (0,1,2))
+);
 ";
 
 /// A row in the "tip" table.

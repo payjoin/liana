@@ -148,10 +148,11 @@ impl SpendTx {
             }
         };
 
+        // HACK: For payjoins the mapping of coins I own and the inputs of the psbt is not correct.
         // One input coin is missing, the psbt is deprecated for now.
-        if coins_map.len() != psbt.inputs.len() {
-            status = SpendStatus::Deprecated
-        }
+        // if coins_map.len() != psbt.inputs.len() {
+        //     status = SpendStatus::Deprecated
+        // }
 
         let sigs = desc
             .partial_spend_info(&psbt)

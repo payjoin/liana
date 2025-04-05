@@ -50,7 +50,7 @@ fern = "0.6"
 backtrace = "0.3"
 
 # payjoin
-payjoin = { git = "https://github.com/0xBEEFCAF3/rust-payjoin.git", rev = "a90944a2cc0e3be0730e09ff370369406221a8a4", features = ["v2", "io"]}
+payjoin = { git = "https://github.com/0xBEEFCAF3/rust-payjoin.git", rev = "619ea5b7dac311461f5ba0d7e6f8ba2e7030e57d", features = ["v2", "io"]}
 
 
 reqwest = { version = "0.11", default-features=false, features = ["json", "rustls-tls", "stream", "blocking"] }

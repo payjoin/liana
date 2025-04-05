@@ -13,6 +13,7 @@ use std::{
     str::FromStr,
 };
 
+use log::info;
 use miniscript::bitcoin::{
     self,
     bip32::{self, Error as Bip32Error},
@@ -238,6 +239,7 @@ impl HotSigner {
         psbt_in: &mut PsbtIn,
         input_index: usize,
     ) -> Result<(), SignerError> {
+        info!("<<<<<< Input: {:?}", psbt_in);
         // First of all compute the sighash for this input. We assume P2WSH spend: the sighash
         // script code is always the witness script.
         let witscript = psbt_in
@@ -373,6 +375,13 @@ impl HotSigner {
 
         // Sign each input in the PSBT.
         for i in 0..psbt.inputs.len() {
+            info!("<<<<<< Input: {:?}", psbt.inputs[i]);
+            // if the input is already finalized, skip it
+            if psbt.inputs[i].final_script_sig.is_some() || psbt.inputs[i].final_script_witness.is_some() {
+                continue;
+            }
+
+            // if the input has a witness script, sign it as a P2WSH input
             if psbt.inputs[i].witness_script.is_some() {
                 self.sign_p2wsh(
                     secp,

@@ -22,7 +22,7 @@ use std::{
 
 use bip329::Labels;
 use miniscript::bitcoin::{self, bip32, psbt::Psbt, secp256k1, Address, Network, OutPoint, Txid};
-use sqlite::PayjoinSenderStatus;
+use sqlite::{PayjoinReceiverStatus, PayjoinSenderStatus};
 
 /// Information about the wallet.
 ///
@@ -204,6 +204,19 @@ pub trait DatabaseConnection {
 
     /// Get a all active payjoin senders
     fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus)>;
+
+    /// Update the spend tx with a new psbt
+    fn update_spend_tx(&mut self, spend_tx_id: bitcoin::Txid, psbt: &Psbt);
+
+    /// Create a payjoin receiver
+    fn create_payjoin_receiver(&mut self, address: String);
+
+    /// Update the status of a payjoin receiver
+    fn update_payjoin_receiver_status(&mut self, address: String, status: PayjoinReceiverStatus);
+
+    /// Get a all active payjoin receivers
+    fn get_all_payjoin_receivers(&mut self) -> Vec<(String, PayjoinReceiverStatus)>;
+
 }
 
 impl DatabaseConnection for SqliteConn {
@@ -438,6 +451,23 @@ impl DatabaseConnection for SqliteConn {
     fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus)> {
         self.get_all_payjoin_senders()
     }
+
+    // TODO: not used remove
+    fn update_spend_tx(&mut self, spend_tx_id: bitcoin::Txid, psbt: &Psbt) {
+        self.update_spend_tx(spend_tx_id, psbt)
+    }
+
+    fn create_payjoin_receiver(&mut self, address: String) {
+        self.create_payjoin_receiver(address)
+    }
+
+    fn update_payjoin_receiver_status(&mut self, address: String, status: PayjoinReceiverStatus) {
+        self.update_payjoin_receiver_status(address, status)
+    }
+
+    fn get_all_payjoin_receivers(&mut self) -> Vec<(String, PayjoinReceiverStatus)> {
+        self.get_all_payjoin_receivers()
+    }   
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
