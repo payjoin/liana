@@ -1,6 +1,6 @@
 use crate::{
     bitcoin::{BitcoinInterface, BlockChainTip, UTxO, UTxOAddress},
-    database::{Coin, DatabaseConnection, DatabaseInterface},
+    database::{sqlite::PayjoinSenderStatus, Coin, DatabaseConnection, DatabaseInterface},
 };
 
 use std::{
@@ -424,7 +424,7 @@ fn post_request(req: payjoin::Request) -> reqwest::blocking::Response {
 
 fn payjoin_sender_check(db_conn: &mut Box<dyn DatabaseConnection>, secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>) {
     let payjoin_senders = db_conn.get_all_payjoin_senders();
-    for (bip21, txid) in payjoin_senders {
+    for (bip21, txid, _) in payjoin_senders {
         info!("Payjoin sender: {}", bip21);
         let mut psbt = db_conn.spend_tx(&txid).expect("Spend tx not found");
         let pj_uri = Uri::try_from(bip21.as_str())
@@ -451,6 +451,9 @@ fn payjoin_sender_check(db_conn: &mut Box<dyn DatabaseConnection>, secp: &secp25
             .expect("Failed to process response");
 
         info!("Payjoin sender response: {:?}", res);
+
+        // Mark the sender as completed
+        db_conn.update_payjoin_sender_status(txid, PayjoinSenderStatus::Completed);
 
         // TODO: check if the response is valid, and if so, update the psbt for this spend tx.
         // USer will need to sign again

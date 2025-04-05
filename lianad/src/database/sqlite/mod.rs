@@ -27,13 +27,12 @@ use crate::{
     },
 };
 use liana::descriptors::LianaDescriptor;
-use payjoin::bitcoin::consensus::{Decodable, Encodable};
 
 use std::{
     cmp,
     collections::{HashMap, HashSet},
     convert::TryInto,
-    fmt, io, path, str::FromStr,
+    fmt, io, path,
 };
 
 use miniscript::bitcoin::{
@@ -219,6 +218,25 @@ const WALLET_ID: i64 = 1;
 
 pub struct SqliteConn {
     conn: rusqlite::Connection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PayjoinSenderStatus {
+    Pending = 0,
+    Completed = 1,
+    // TODO: more specific enums for why it failed
+    Failed = 2,
+}
+
+impl From<i32> for PayjoinSenderStatus {
+    fn from(status: i32) -> Self {
+        match status {
+            0 => PayjoinSenderStatus::Pending,
+            1 => PayjoinSenderStatus::Completed,
+            2 => PayjoinSenderStatus::Failed,
+            _ => panic!("Invalid payjoin sender status: {}", status),
+        }
+    }
 }
 
 impl SqliteConn {
@@ -967,25 +985,47 @@ impl SqliteConn {
 
     /// Create a payjoin sender
     pub fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
+        let status = PayjoinSenderStatus::Pending;
         let txid = spend_tx_id[..].to_vec();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_senders (bip21, spend_tx_id) VALUES (?1, ?2)",
-                rusqlite::params![bip21, txid],
+                "INSERT INTO payjoin_senders (bip21, spend_tx_id, status) VALUES (?1, ?2, ?3)",
+                rusqlite::params![bip21, txid, status as i32],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
     }
 
-    pub fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid)> {
-        db_query(&mut self.conn, "SELECT bip21, spend_tx_id FROM payjoin_senders", rusqlite::params![], |row| {
-            let bip21: String = row.get(0)?;
-            let spend_tx_id: Vec<u8> = row.get(1)?;
-            let txid: bitcoin::Txid =
-                encode::deserialize(&spend_tx_id).expect("We only store valid txids");
-            Ok((bip21, txid))
+    pub fn update_payjoin_sender_status(
+        &mut self,
+        spend_tx_id: bitcoin::Txid,
+        status: PayjoinSenderStatus,
+    ) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "UPDATE payjoin_senders SET status = ?1 WHERE spend_tx_id = ?2",
+                rusqlite::params![status as i32, spend_tx_id[..].to_vec()],
+            )?;
+            Ok(())
         })
+        .expect("Db must not fail");
+    }
+
+    pub fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus)> {
+        db_query(
+            &mut self.conn,
+            "SELECT bip21, spend_tx_id, status FROM payjoin_senders WHERE status = ?1",
+            rusqlite::params![PayjoinSenderStatus::Pending as i32],
+            |row| {
+                let bip21: String = row.get(0)?;
+                let spend_tx_id: Vec<u8> = row.get(1)?;
+                let txid: bitcoin::Txid =
+                    encode::deserialize(&spend_tx_id).expect("We only store valid txids");
+                let status: i32 = row.get(2)?;
+                Ok((bip21, txid, PayjoinSenderStatus::from(status)))
+            },
+        )
         .expect("Db must not fail")
     }
 }
@@ -1249,7 +1289,8 @@ CREATE TABLE labels (
 CREATE TABLE payjoin_senders (
     id INTEGER PRIMARY KEY NOT NULL,
     bip21 TEXT NOT NULL,
-    spend_tx_id BLOB UNIQUE NOT NULL
+    spend_tx_id BLOB UNIQUE NOT NULL,
+    status INTEGER NOT NULL CHECK (status IN (0,1,2))
 );
 
 ";
@@ -1287,12 +1328,38 @@ CREATE TABLE payjoin_senders (
     fn can_store_and_retrieve_payjoin_sender() {
         let (_, _, _, db) = dummy_db();
         let mut conn = db.connection().unwrap();
-        let txid = bitcoin::Txid::from_str("0c62a990d20d54429e70859292e82374ba6b1b951a3ab60f26bb65fee5724ff7").unwrap();
+        let txid = bitcoin::Txid::from_str(
+            "0c62a990d20d54429e70859292e82374ba6b1b951a3ab60f26bb65fee5724ff7",
+        )
+        .unwrap();
         conn.create_payjoin_sender("bip21".to_string(), txid);
         let payjoin_senders = conn.get_all_payjoin_senders();
         assert_eq!(payjoin_senders.len(), 1);
         assert_eq!(payjoin_senders[0].0, "bip21");
         assert_eq!(payjoin_senders[0].1, txid);
+        assert_eq!(payjoin_senders[0].2, PayjoinSenderStatus::Pending);
+    }
+
+    #[test]
+    fn can_update_payjoin_sender_status() {
+        let (_, _, _, db) = dummy_db();
+        let mut conn = db.connection().unwrap();
+        let txid = bitcoin::Txid::from_str(
+            "0c62a990d20d54429e70859292e82374ba6b1b951a3ab60f26bb65fee5724ff7",
+        )
+        .unwrap();
+        conn.create_payjoin_sender("bip21".to_string(), txid);
+
+        conn.update_payjoin_sender_status(txid, PayjoinSenderStatus::Completed);
+        let payjoin_senders = conn.get_all_payjoin_senders();
+        // Should not get completed senders
+        assert_eq!(payjoin_senders.len(), 0);
+        conn.update_payjoin_sender_status(txid, PayjoinSenderStatus::Pending);
+        let payjoin_senders = conn.get_all_payjoin_senders();
+        assert_eq!(payjoin_senders.len(), 1);
+        assert_eq!(payjoin_senders[0].0, "bip21");
+        assert_eq!(payjoin_senders[0].1, txid);
+        assert_eq!(payjoin_senders[0].2, PayjoinSenderStatus::Pending);
     }
 
     // All values required to store a coin in the V3 schema DB (including `id` column).

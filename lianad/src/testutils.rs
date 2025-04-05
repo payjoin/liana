@@ -2,7 +2,8 @@ use crate::{
     bitcoin::{BitcoinInterface, Block, BlockChainTip, MempoolEntry, SyncProgress, UTxO},
     config::{BitcoinConfig, Config},
     database::{
-        BlockInfo, Coin, CoinStatus, DatabaseConnection, DatabaseInterface, LabelItem, Wallet,
+        sqlite::PayjoinSenderStatus, BlockInfo, Coin, CoinStatus, DatabaseConnection,
+        DatabaseInterface, LabelItem, Wallet,
     },
     DaemonControl, DaemonHandle,
 };
@@ -154,7 +155,7 @@ struct DummyDbState {
     timestamp: u32,
     rescan_timestamp: Option<u32>,
     last_poll_timestamp: Option<u32>,
-    payjoin_senders: HashMap<bitcoin::Txid, String>,
+    payjoin_senders: HashMap<bitcoin::Txid, (String, PayjoinSenderStatus)>,
 }
 
 pub struct DummyDatabase {
@@ -202,14 +203,35 @@ impl DummyDatabase {
 }
 
 impl DatabaseConnection for DummyDatabase {
-
     fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
-        self.db.write().unwrap().payjoin_senders.insert(spend_tx_id, bip21);
+        self.db
+            .write()
+            .unwrap()
+            .payjoin_senders
+            .insert(spend_tx_id, (bip21, PayjoinSenderStatus::Pending));
     }
 
-    fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid)> {
+    fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus)> {
         let senders = self.db.read().unwrap().payjoin_senders.clone();
-        senders.into_iter().map(|(txid, bip21)| (bip21, txid)).collect()
+        senders
+            .into_iter()
+            .map(|(txid, (bip21, status))| (bip21, txid, status))
+            .filter(|(_, _, status)| *status == PayjoinSenderStatus::Pending)
+            .collect()
+    }
+
+    fn update_payjoin_sender_status(
+        &mut self,
+        spend_tx_id: bitcoin::Txid,
+        status: PayjoinSenderStatus,
+    ) {
+        let db_read = self.db.read().unwrap();
+        let value = db_read.payjoin_senders.get(&spend_tx_id).unwrap();
+        self.db
+            .write()
+            .unwrap()
+            .payjoin_senders
+            .insert(spend_tx_id, (value.0.clone(), status));
     }
 
     fn network(&mut self) -> bitcoin::Network {
