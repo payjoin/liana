@@ -8,7 +8,9 @@ use liana::miniscript::bitcoin::{
     Address, Network,
 };
 use liana_ui::{component::modal, widget::*};
+use payjoin::{io::fetch_ohttp_keys, Url};
 
+use crate::app::view::receive::PayjoinSpecs;
 use crate::daemon::model::LabelsLoader;
 use crate::{
     app::{
@@ -57,6 +59,7 @@ pub struct ReceivePanel {
     data_dir: PathBuf,
     wallet: Arc<Wallet>,
     addresses: Addresses,
+    payjoin_specs: PayjoinSpecs,
     labels_edited: LabelsEdited,
     modal: Modal,
     warning: Option<Error>,
@@ -64,10 +67,24 @@ pub struct ReceivePanel {
 
 impl ReceivePanel {
     pub fn new(data_dir: PathBuf, wallet: Arc<Wallet>) -> Self {
+        // TODO: Move it to DB (or Cache maybe?)
+        let ohttp_relay = Url::parse("https://pj.bobspacebkk.com").unwrap();
+        let directory = Url::parse("https://payjo.in").unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ohttp_keys = rt
+            .block_on(async { fetch_ohttp_keys(ohttp_relay.clone(), directory.clone()).await })
+            .unwrap();
+        // ----
+
         Self {
             data_dir,
             wallet,
             addresses: Addresses::default(),
+            payjoin_specs: PayjoinSpecs {
+                directory,
+                ohttp_relay,
+                ohttp_keys,
+            },
             labels_edited: LabelsEdited::default(),
             modal: Modal::None,
             warning: None,
@@ -83,6 +100,7 @@ impl State for ReceivePanel {
             self.warning.as_ref(),
             view::receive::receive(
                 &self.addresses.list,
+                &self.payjoin_specs,
                 &self.addresses.labels,
                 self.labels_edited.cache(),
             ),

@@ -23,7 +23,7 @@ use liana_ui::{
     widget::*,
 };
 
-use payjoin::{io::fetch_ohttp_keys, persist::NoopPersister, Url};
+use payjoin::{persist::NoopPersister, OhttpKeys, Url};
 
 use crate::{
     app::{
@@ -35,8 +35,15 @@ use crate::{
 
 use super::message::Message;
 
+pub struct PayjoinSpecs {
+    pub directory: Url,
+    pub ohttp_relay: Url,
+    pub ohttp_keys: OhttpKeys,
+}
+
 pub fn receive<'a>(
     addresses: &'a [bitcoin::Address],
+    payjoin_specs: &PayjoinSpecs,
     labels: &'a HashMap<String, String>,
     labels_editing: &'a HashMap<String, form::Value<String>>,
 ) -> Element<'a, Message> {
@@ -59,23 +66,24 @@ pub fn receive<'a>(
                     |col, (i, address)| {
                         let addr = address.to_string();
 
-                        // This is being called on every refresh...Move it to Cache or DB
-                        let ohttp_relay = Url::parse("https://pj.bobspacebkk.com").unwrap();
-                        let directory = Url::parse("https://payjo.in").unwrap();
-                        let rt = tokio::runtime::Runtime::new().unwrap();
-                        let ohttp_keys = rt.block_on(async { fetch_ohttp_keys(ohttp_relay.clone(), directory.clone()).await }).unwrap();
-                        // ----
-
-                        let new_receiver = payjoin::receive::v2::NewReceiver::new(
+                        let pj_receiver = payjoin::receive::v2::NewReceiver::new(
                             address.clone(),
-                            directory.clone(),
-                            ohttp_keys,
+                            payjoin_specs.directory.clone(),
+                            payjoin_specs.ohttp_keys.clone(),
                             Some(std::time::Duration::from_secs(600)),
-                        ).unwrap();
+                        )
+                        .unwrap();
 
-                        let storage_token = new_receiver.persist(&mut NoopPersister).unwrap();
-                        let receiver = payjoin::receive::v2::Receiver::load(storage_token, &mut NoopPersister).unwrap();
-                        let payjoin_uri = receiver.pj_uri().to_string();
+                        let storage_token = pj_receiver.persist(&mut NoopPersister).unwrap();
+                        let receiver =
+                            payjoin::receive::v2::Receiver::load(storage_token, &mut NoopPersister)
+                                .unwrap();
+
+                        let pj_uri = receiver.pj_uri();
+                        // let mut pj_uri = receiver.pj_uri();
+                        // pj_uri.amount = Some(Amount::from_btc(0.001).unwrap());
+
+                        let payjoin_uri = pj_uri.to_string();
 
                         col.push(
                             card::simple(
@@ -162,7 +170,7 @@ pub fn receive<'a>(
                                                     icon::clipboard_icon()
                                                         .style(theme::text::secondary),
                                                 )
-                                                .on_press(Message::Clipboard(payjoin_uri))
+                                                .on_press(Message::Clipboard(payjoin_uri.clone()))
                                                 .style(theme::button::transparent_border),
                                             )
                                             .align_y(Alignment::Center),
