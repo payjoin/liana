@@ -8,6 +8,8 @@ use liana::miniscript::bitcoin::{
     Address, Network,
 };
 use liana_ui::{component::modal, widget::*};
+use payjoin::io::fetch_ohttp_keys;
+use payjoin::Url;
 
 use crate::daemon::model::LabelsLoader;
 use crate::{
@@ -37,6 +39,7 @@ pub enum Modal {
 #[derive(Debug, Default)]
 pub struct Addresses {
     list: Vec<Address>,
+    payjoin_uris: HashMap<String, String>,
     derivation_indexes: Vec<ChildNumber>,
     labels: HashMap<String, String>,
 }
@@ -83,6 +86,7 @@ impl State for ReceivePanel {
             self.warning.as_ref(),
             view::receive::receive(
                 &self.addresses.list,
+                &self.addresses.payjoin_uris,
                 &self.addresses.labels,
                 self.labels_edited.cache(),
             ),
@@ -129,10 +133,11 @@ impl State for ReceivePanel {
             }
             Message::ReceiveAddress(res) => {
                 match res {
-                    Ok((address, derivation_index)) => {
+                    Ok((address, derivation_index, payjoin_uri)) => {
                         self.warning = None;
-                        self.addresses.list.push(address);
+                        self.addresses.list.push(address.clone());
                         self.addresses.derivation_indexes.push(derivation_index);
+                        self.addresses.payjoin_uris.insert(address.to_string(), payjoin_uri);
                     }
                     Err(e) => self.warning = Some(e),
                 }
@@ -158,12 +163,19 @@ impl State for ReceivePanel {
             }
             Message::View(view::Message::Next) => {
                 let daemon = daemon.clone();
+
+                let ohttp_relay = Url::parse("https://pj.bobspacebkk.com").unwrap();
+                let directory = Url::parse("https://payjo.in").unwrap();
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                let ohttp_keys = rt
+                    .block_on(async { fetch_ohttp_keys(ohttp_relay.clone(), directory.clone()).await })
+                    .unwrap();
                 Task::perform(
                     async move {
                         daemon
-                            .get_new_address()
+                            .receive_payjoin(directory, ohttp_keys)
                             .await
-                            .map(|res| (res.address, res.derivation_index))
+                            .map(|res| (res.address, res.derivation_index, res.payjoin_uri))
                             .map_err(|e| e.into())
                     },
                     Message::ReceiveAddress,
@@ -178,6 +190,24 @@ impl State for ReceivePanel {
                         self.modal = Modal::ShowQrCode(modal);
                     }
                 }
+                Task::none()
+            }
+            Message::View(view::Message::PayjoinInitiate(payjoin_uri)) => {
+                println!("PayjoinInitiate (payjoin_uri): {}", payjoin_uri);
+                let daemon = daemon.clone();
+                Task::perform(
+                    async move {
+                        daemon
+                            .get_new_address()
+                            .await
+                            .map(|res| res.payjoin_uri)
+                            .map_err(|e| e.into())
+                    },
+                    Message::PayjoinInitiated,
+                )
+            }
+            Message::PayjoinInitiated(res) => {
+                println!("PayjoinInitiated (payjoin_uri): {}", res.unwrap());
                 Task::none()
             }
             _ => {
@@ -352,7 +382,8 @@ mod tests {
             Some(json!({"method": "getnewaddress", "params": Option::<Request>::None})),
             Ok(json!(GetAddressResult::new(
                 addr.clone(),
-                ChildNumber::from_normal_idx(0).unwrap()
+                ChildNumber::from_normal_idx(0).unwrap(),
+                "bitcoin:".to_string(),
             ))),
         )]);
         let wallet = Arc::new(Wallet::new(LianaDescriptor::from_str(DESC).unwrap()));

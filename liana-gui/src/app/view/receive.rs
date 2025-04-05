@@ -35,6 +35,7 @@ use super::message::Message;
 
 pub fn receive<'a>(
     addresses: &'a [bitcoin::Address],
+    payjoin_uris: &'a HashMap<String, String>,
     labels: &'a HashMap<String, String>,
     labels_editing: &'a HashMap<String, form::Value<String>>,
 ) -> Element<'a, Message> {
@@ -56,6 +57,7 @@ pub fn receive<'a>(
                     Column::new().spacing(10).width(Length::Fill),
                     |col, (i, address)| {
                         let addr = address.to_string();
+                        let payjoin_uri = payjoin_uris.get(&addr).unwrap();
                         col.push(
                             card::simple(
                                 Column::new()
@@ -112,6 +114,43 @@ pub fn receive<'a>(
                                     .push(
                                         Row::new()
                                             .push(
+                                                Container::new(
+                                                    scrollable(
+                                                        Column::new()
+                                                            .push(Space::with_height(
+                                                                Length::Fixed(10.0),
+                                                            ))
+                                                            .push(
+                                                                p2_regular(&payjoin_uri)
+                                                                    .small()
+                                                                    .style(theme::text::secondary),
+                                                            )
+                                                            // Space between the URI and the scrollbar
+                                                            .push(Space::with_height(
+                                                                Length::Fixed(10.0),
+                                                            )),
+                                                    )
+                                                    .direction(scrollable::Direction::Horizontal(
+                                                        scrollable::Scrollbar::new()
+                                                            .width(2)
+                                                            .scroller_width(2),
+                                                    )),
+                                                )
+                                                .width(Length::Fill),
+                                            )
+                                            .push(
+                                                Button::new(
+                                                    icon::clipboard_icon()
+                                                        .style(theme::text::secondary),
+                                                )
+                                                .on_press(Message::Clipboard(payjoin_uri.clone()))
+                                                .style(theme::button::transparent_border),
+                                            )
+                                            .align_y(Alignment::Center),
+                                    )
+                                    .push(
+                                        Row::new()
+                                            .push(
                                                 button::secondary(
                                                     None,
                                                     "Verify on hardware device",
@@ -119,6 +158,11 @@ pub fn receive<'a>(
                                                 .on_press(Message::Select(i)),
                                             )
                                             .push(Space::with_width(Length::Fill))
+                                            .push(
+                                                button::secondary(None, "Payjoin")
+                                                    .on_press(Message::ReceivePayjoin(payjoin_uri.clone())),
+                                            )
+                                            .spacing(10)
                                             .push(
                                                 button::secondary(None, "Show QR Code")
                                                     .on_press(Message::ShowQrCode(i)),

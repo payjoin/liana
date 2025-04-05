@@ -25,7 +25,7 @@ pub enum Message {
     DaemonConfigLoaded(Result<(), Error>),
     LoadWallet(Wallet),
     Info(Result<GetInfoResult, Error>),
-    ReceiveAddress(Result<(Address, ChildNumber), Error>),
+    ReceiveAddress(Result<(Address, ChildNumber, String), Error>),
     Coins(Result<Vec<Coin>, Error>),
     Labels(Result<HashMap<String, String>, Error>),
     SpendTxs(Result<Vec<SpendTx>, Error>),
@@ -48,7 +48,8 @@ pub enum Message {
     BroadcastModal(Result<HashSet<Txid>, Error>),
     RbfModal(Box<HistoryTransaction>, bool, Result<HashSet<Txid>, Error>),
     Export(ImportExportMessage),
-    SendPayjoin(Result<(), Error>)
+    SendPayjoin(Result<(), Error>),
+    PayjoinInitiated(Result<String, Error>),
 }
 
 impl From<ImportExportMessage> for Message {
