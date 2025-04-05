@@ -228,6 +228,14 @@ pub enum PayjoinSenderStatus {
     Failed = 2,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PayjoinReceiverStatus {
+    Pending = 0,
+    Completed = 1,
+    // TODO: more specific enums for why it failed
+    Failed = 2,
+}
+
 impl From<i32> for PayjoinSenderStatus {
     fn from(status: i32) -> Self {
         match status {
@@ -235,6 +243,17 @@ impl From<i32> for PayjoinSenderStatus {
             1 => PayjoinSenderStatus::Completed,
             2 => PayjoinSenderStatus::Failed,
             _ => panic!("Invalid payjoin sender status: {}", status),
+        }
+    }
+}
+
+impl From<i32> for PayjoinReceiverStatus {
+    fn from(status: i32) -> Self {
+        match status {
+            0 => PayjoinReceiverStatus::Pending,
+            1 => PayjoinReceiverStatus::Completed,
+            2 => PayjoinReceiverStatus::Failed,
+            _ => panic!("Invalid payjoin receiver status: {}", status),
         }
     }
 }
@@ -1029,6 +1048,7 @@ impl SqliteConn {
         .expect("Db must not fail")
     }
 
+    // TODO: not used remove
     pub fn update_spend_tx(&mut self, spend_tx_id: bitcoin::Txid, psbt: &Psbt) {
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
@@ -1039,7 +1059,48 @@ impl SqliteConn {
         })
         .expect("Db must not fail");
     }
-    
+
+    /// Create a payjoin receiver, TODO: strong type to bitcoin::Address?
+    pub fn create_payjoin_receiver(&mut self, address: String) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "INSERT INTO payjoin_receivers (address, status) VALUES (?1, ?2)",
+                rusqlite::params![address, PayjoinReceiverStatus::Pending as i32],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+
+    pub fn update_payjoin_receiver_status(
+        &mut self,
+        address: String,
+        status: PayjoinReceiverStatus,
+    ) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "UPDATE payjoin_receivers SET status = ?1 WHERE address = ?2",
+                rusqlite::params![status as i32, address],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    pub fn get_all_payjoin_receivers(&mut self) -> Vec<(String, PayjoinReceiverStatus)> {
+        db_query(
+            &mut self.conn,
+            "SELECT address, status FROM payjoin_receivers WHERE status = ?1",
+            rusqlite::params![PayjoinReceiverStatus::Pending as i32],
+            |row| {
+                let address: String = row.get(0)?;
+                let status: i32 = row.get(1)?;
+                Ok((address, PayjoinReceiverStatus::from(status)))
+            },
+        )
+        .expect("Db must not fail")
+    }
 }
 
 #[cfg(test)]
@@ -1305,6 +1366,12 @@ CREATE TABLE payjoin_senders (
     status INTEGER NOT NULL CHECK (status IN (0,1,2))
 );
 
+CREATE TABLE payjoin_receivers (
+    id INTEGER PRIMARY KEY NOT NULL,
+    address TEXT NOT NULL,
+    status INTEGER NOT NULL CHECK (status IN (0,1,2))
+);
+
 ";
 
     fn psbt_from_str(psbt_str: &str) -> Psbt {
@@ -1372,6 +1439,22 @@ CREATE TABLE payjoin_senders (
         assert_eq!(payjoin_senders[0].0, "bip21");
         assert_eq!(payjoin_senders[0].1, txid);
         assert_eq!(payjoin_senders[0].2, PayjoinSenderStatus::Pending);
+    }
+
+    #[test]
+    fn can_create_and_update_payjoin_receiver() {
+        let (_, _, _, db) = dummy_db();
+        let mut conn = db.connection().unwrap();
+        let address = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa".to_string();
+        conn.create_payjoin_receiver(address.clone());
+        let payjoin_receivers = conn.get_all_payjoin_receivers();
+        assert_eq!(payjoin_receivers.len(), 1);
+        assert_eq!(payjoin_receivers[0].0, address);
+        assert_eq!(payjoin_receivers[0].1, PayjoinReceiverStatus::Pending);
+
+        conn.update_payjoin_receiver_status(address.clone(), PayjoinReceiverStatus::Completed);
+        let payjoin_receivers = conn.get_all_payjoin_receivers();
+        assert_eq!(payjoin_receivers.len(), 0);
     }
 
     #[test]

@@ -2,7 +2,7 @@ use crate::{
     bitcoin::{BitcoinInterface, Block, BlockChainTip, MempoolEntry, SyncProgress, UTxO},
     config::{BitcoinConfig, Config},
     database::{
-        sqlite::PayjoinSenderStatus, BlockInfo, Coin, CoinStatus, DatabaseConnection,
+        sqlite::{PayjoinReceiverStatus, PayjoinSenderStatus}, BlockInfo, Coin, CoinStatus, DatabaseConnection,
         DatabaseInterface, LabelItem, Wallet,
     },
     DaemonControl, DaemonHandle,
@@ -156,6 +156,7 @@ struct DummyDbState {
     rescan_timestamp: Option<u32>,
     last_poll_timestamp: Option<u32>,
     payjoin_senders: HashMap<bitcoin::Txid, (String, PayjoinSenderStatus)>,
+    payjoin_receivers: HashMap<String, PayjoinReceiverStatus>,
 }
 
 pub struct DummyDatabase {
@@ -191,6 +192,7 @@ impl DummyDatabase {
                 rescan_timestamp: None,
                 last_poll_timestamp: None,
                 payjoin_senders: HashMap::new(),
+                payjoin_receivers: HashMap::new(),
             })),
         }
     }
@@ -203,6 +205,27 @@ impl DummyDatabase {
 }
 
 impl DatabaseConnection for DummyDatabase {
+
+    fn create_payjoin_receiver(&mut self, address: String) {
+        self.db
+            .write()
+            .unwrap()
+            .payjoin_receivers
+            .insert(address, PayjoinReceiverStatus::Pending);
+    }
+
+    fn update_payjoin_receiver_status(&mut self, address: String, status: PayjoinReceiverStatus) {
+        self.db
+            .write()
+            .unwrap()
+            .payjoin_receivers
+            .insert(address, status);
+    }
+
+    fn get_all_payjoin_receivers(&mut self) -> Vec<(String, PayjoinReceiverStatus)> {
+        self.db.read().unwrap().payjoin_receivers.clone().into_iter().collect()
+    }
+
     fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
         self.db
             .write()
