@@ -1061,11 +1061,11 @@ impl SqliteConn {
     }
 
     /// Create a payjoin receiver, TODO: strong type to bitcoin::Address?
-    pub fn create_payjoin_receiver(&mut self, address: String) {
+    pub fn create_payjoin_receiver(&mut self, bip21: String) {
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_receivers (address, status) VALUES (?1, ?2)",
-                rusqlite::params![address, PayjoinReceiverStatus::Pending as i32],
+                "INSERT INTO payjoin_receivers (bip21, status) VALUES (?1, ?2)",
+                rusqlite::params![bip21, PayjoinReceiverStatus::Pending as i32],
             )?;
             Ok(())
         })
@@ -1075,13 +1075,13 @@ impl SqliteConn {
 
     pub fn update_payjoin_receiver_status(
         &mut self,
-        address: String,
+        bip21: String,
         status: PayjoinReceiverStatus,
     ) {
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "UPDATE payjoin_receivers SET status = ?1 WHERE address = ?2",
-                rusqlite::params![status as i32, address],
+                "UPDATE payjoin_receivers SET status = ?1 WHERE bip21 = ?2",
+                rusqlite::params![status as i32, bip21],
             )?;
             Ok(())
         })
@@ -1091,12 +1091,12 @@ impl SqliteConn {
     pub fn get_all_payjoin_receivers(&mut self) -> Vec<(String, PayjoinReceiverStatus)> {
         db_query(
             &mut self.conn,
-            "SELECT address, status FROM payjoin_receivers WHERE status = ?1",
+            "SELECT bip21, status FROM payjoin_receivers WHERE status = ?1",
             rusqlite::params![PayjoinReceiverStatus::Pending as i32],
             |row| {
-                let address: String = row.get(0)?;
+                let bip21: String = row.get(0)?;
                 let status: i32 = row.get(1)?;
-                Ok((address, PayjoinReceiverStatus::from(status)))
+                Ok((bip21, PayjoinReceiverStatus::from(status)))
             },
         )
         .expect("Db must not fail")
@@ -1368,7 +1368,7 @@ CREATE TABLE payjoin_senders (
 
 CREATE TABLE payjoin_receivers (
     id INTEGER PRIMARY KEY NOT NULL,
-    address TEXT NOT NULL,
+    bip21 TEXT NOT NULL,
     status INTEGER NOT NULL CHECK (status IN (0,1,2))
 );
 
@@ -1445,14 +1445,14 @@ CREATE TABLE payjoin_receivers (
     fn can_create_and_update_payjoin_receiver() {
         let (_, _, _, db) = dummy_db();
         let mut conn = db.connection().unwrap();
-        let address = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa".to_string();
-        conn.create_payjoin_receiver(address.clone());
+        let bip21 = "bip21".to_string();
+        conn.create_payjoin_receiver(bip21.clone());
         let payjoin_receivers = conn.get_all_payjoin_receivers();
         assert_eq!(payjoin_receivers.len(), 1);
-        assert_eq!(payjoin_receivers[0].0, address);
+        assert_eq!(payjoin_receivers[0].0, bip21);
         assert_eq!(payjoin_receivers[0].1, PayjoinReceiverStatus::Pending);
 
-        conn.update_payjoin_receiver_status(address.clone(), PayjoinReceiverStatus::Completed);
+        conn.update_payjoin_receiver_status(bip21.clone(), PayjoinReceiverStatus::Completed);
         let payjoin_receivers = conn.get_all_payjoin_receivers();
         assert_eq!(payjoin_receivers.len(), 0);
     }
