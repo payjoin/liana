@@ -438,7 +438,22 @@ fn payjoin_sender_check(
             .assume_checked()
             .check_pj_supported()
             .expect("Invalid PJ BIP21");
-        psbt.finalize_mut(secp).expect("finalize should work");
+
+        // Clone the psbt to finalize, and copy over the witness,
+        // this is bc finalize mut will remove those fields and we need them again when we sign the pj psbt
+        let mut psbt_to_finalize = psbt.clone();
+        psbt_to_finalize.finalize_mut(secp).expect("finalize should work");
+
+        for (i, input) in psbt_to_finalize.inputs.iter_mut().enumerate() {
+            psbt.inputs[i].final_script_sig = input.final_script_sig.clone();
+            psbt.inputs[i].final_script_witness = input.final_script_witness.clone();
+        }
+
+        // TODO: remove later, for debugging
+        let psbt_string = psbt.to_string();
+        info!("<<<<<< PSBT being sent to receiver: {:?}", psbt_string);
+
+        
         let new_sender = SenderBuilder::new(psbt, pj_uri)
             .build_recommended(FeeRate::BROADCAST_MIN)
             .expect("Failed to build sender");
