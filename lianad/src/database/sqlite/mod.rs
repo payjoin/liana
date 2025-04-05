@@ -27,12 +27,13 @@ use crate::{
     },
 };
 use liana::descriptors::LianaDescriptor;
+use payjoin::bitcoin::consensus::{Decodable, Encodable};
 
 use std::{
     cmp,
     collections::{HashMap, HashSet},
     convert::TryInto,
-    fmt, io, path,
+    fmt, io, path, str::FromStr,
 };
 
 use miniscript::bitcoin::{
@@ -966,14 +967,26 @@ impl SqliteConn {
 
     /// Create a payjoin sender
     pub fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
+        let txid = spend_tx_id[..].to_vec();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
                 "INSERT INTO payjoin_senders (bip21, spend_tx_id) VALUES (?1, ?2)",
-                rusqlite::params![bip21, spend_tx_id[..].to_vec()],
+                rusqlite::params![bip21, txid],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
+    }
+
+    pub fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid)> {
+        db_query(&mut self.conn, "SELECT bip21, spend_tx_id FROM payjoin_senders", rusqlite::params![], |row| {
+            let bip21: String = row.get(0)?;
+            let spend_tx_id: Vec<u8> = row.get(1)?;
+            let txid: bitcoin::Txid =
+                encode::deserialize(&spend_tx_id).expect("We only store valid txids");
+            Ok((bip21, txid))
+        })
+        .expect("Db must not fail")
     }
 }
 
@@ -1236,7 +1249,7 @@ CREATE TABLE labels (
 CREATE TABLE payjoin_senders (
     id INTEGER PRIMARY KEY NOT NULL,
     bip21 TEXT NOT NULL,
-    spend_tx_id INTEGER NOT NULL
+    spend_tx_id BLOB UNIQUE NOT NULL
 );
 
 ";
@@ -1271,14 +1284,15 @@ CREATE TABLE payjoin_senders (
     }
 
     #[test]
-    fn can_store_payjoin_sender() {
-        let (tmp_dir, options, _, db) = dummy_db();
+    fn can_store_and_retrieve_payjoin_sender() {
+        let (_, _, _, db) = dummy_db();
         let mut conn = db.connection().unwrap();
         let txid = bitcoin::Txid::from_str("0c62a990d20d54429e70859292e82374ba6b1b951a3ab60f26bb65fee5724ff7").unwrap();
         conn.create_payjoin_sender("bip21".to_string(), txid);
-        // let payjoin_sender = conn.db_payjoin_sender();
-        // assert_eq!(payjoin_sender.bip21, "bip21");
-        // assert_eq!(payjoin_sender.spend_tx_id, txid);
+        let payjoin_senders = conn.get_all_payjoin_senders();
+        assert_eq!(payjoin_senders.len(), 1);
+        assert_eq!(payjoin_senders[0].0, "bip21");
+        assert_eq!(payjoin_senders[0].1, txid);
     }
 
     // All values required to store a coin in the V3 schema DB (including `id` column).

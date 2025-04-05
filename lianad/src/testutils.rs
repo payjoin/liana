@@ -206,7 +206,11 @@ impl DatabaseConnection for DummyDatabase {
     fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
         self.db.write().unwrap().payjoin_senders.insert(spend_tx_id, bip21);
     }
-    
+
+    fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid)> {
+        let senders = self.db.read().unwrap().payjoin_senders.clone();
+        senders.into_iter().map(|(txid, bip21)| (bip21, txid)).collect()
+    }
 
     fn network(&mut self) -> bitcoin::Network {
         bitcoin::Network::Bitcoin

@@ -127,7 +127,7 @@ CREATE TABLE labels (
 CREATE TABLE payjoin_senders (
     id INTEGER PRIMARY KEY NOT NULL,
     bip21 TEXT NOT NULL,
-    spend_tx_id INTEGER NOT NULL
+    spend_tx_id BLOB UNIQUE NOT NULL
 );
 ";
 

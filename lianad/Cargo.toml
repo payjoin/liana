@@ -52,6 +52,10 @@ backtrace = "0.3"
 # payjoin
 payjoin = { git = "https://github.com/0xBEEFCAF3/rust-payjoin.git", rev = "a90944a2cc0e3be0730e09ff370369406221a8a4", features = ["v2", "io"]}
 
+
+reqwest = { version = "0.11", default-features=false, features = ["json", "rustls-tls", "stream", "blocking"] }
+
+
 # Pinned to this version because they keep breaking their MSRV in point releases...
 # FIXME: this is unfortunate, we don't receive the updates (sometimes critical) from SQLite.
 rusqlite = { version = "0.30", features = ["bundled", "unlock_notify"] }

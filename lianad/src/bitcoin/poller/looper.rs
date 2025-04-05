@@ -3,10 +3,22 @@ use crate::{
     database::{Coin, DatabaseConnection, DatabaseInterface},
 };
 
-use std::{collections::HashSet, convert::TryInto, sync, thread, time};
+use std::{
+    collections::HashSet,
+    convert::{TryFrom, TryInto},
+    str::FromStr,
+    sync, thread, time,
+};
 
 use liana::descriptors;
-use miniscript::bitcoin::{self, secp256k1};
+use log::info;
+use miniscript::{bitcoin::{self, secp256k1}, psbt::PsbtExt};
+use payjoin::{
+    bitcoin::FeeRate,
+    persist::NoopPersister,
+    send::v2::{NewSender, Sender, SenderBuilder},
+    Uri, UriExt, Url,
+};
 
 #[derive(Debug, Clone)]
 struct UpdatedCoins {
@@ -395,6 +407,57 @@ pub fn sync_poll_interval() -> time::Duration {
     time::Duration::from_secs(0)
 }
 
+const OHTTP_RELAY: &str = "https://pj.bobspacebkk.com";
+
+fn http_agent() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::new()
+}
+
+fn post_request(req: payjoin::Request) -> reqwest::blocking::Response {
+    let http = http_agent();
+    http.post(req.url)
+        .header("Content-Type", req.content_type)
+        .body(req.body)
+        .send()
+        .expect("Failed to send request")
+}
+
+fn payjoin_sender_check(db_conn: &mut Box<dyn DatabaseConnection>, secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>) {
+    let payjoin_senders = db_conn.get_all_payjoin_senders();
+    for (bip21, txid) in payjoin_senders {
+        info!("Payjoin sender: {}", bip21);
+        let mut psbt = db_conn.spend_tx(&txid).expect("Spend tx not found");
+        let pj_uri = Uri::try_from(bip21.as_str())
+            .expect("Invalid BIP21")
+            .assume_checked()
+            .check_pj_supported()
+            .expect("Invalid PJ BIP21");
+        psbt.finalize_mut(secp).expect("finalize should work");
+        let new_sender = SenderBuilder::new(psbt, pj_uri)
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .expect("Failed to build sender");
+        // TODO: should just be able to load a sender from the db, and not use the NoopPersister.
+        let sender_storage_token = new_sender
+            .persist(&mut NoopPersister)
+            .expect("Failed to persist sender");
+        let sender =
+            Sender::load(sender_storage_token, &NoopPersister).expect("Failed to load sender");
+
+        let url = Url::from_str(OHTTP_RELAY).expect("Invalid OHTTP relay");
+        let (get_req, ohttp_ctx) = sender.extract_v2(url).expect("Failed to extract v2");
+        let resp = post_request(get_req);
+        let res = ohttp_ctx
+            .process_response(resp.bytes().expect("Failed to read response").as_ref())
+            .expect("Failed to process response");
+
+        info!("Payjoin sender response: {:?}", res);
+
+        // TODO: check if the response is valid, and if so, update the psbt for this spend tx.
+        // USer will need to sign again
+
+    }
+}
+
 /// Update our state from the Bitcoin backend.
 pub fn poll(
     bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
@@ -405,6 +468,7 @@ pub fn poll(
     let mut db_conn = db.connection();
     updates(&mut db_conn, bit, descs, secp);
     rescan_check(&mut db_conn, bit, descs, secp);
+    payjoin_sender_check(&mut db_conn, secp);
     let now: u32 = time::SystemTime::now()
         .duration_since(time::UNIX_EPOCH)
         .expect("current system time must be later than epoch")

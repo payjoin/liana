@@ -197,6 +197,9 @@ pub trait DatabaseConnection {
 
     /// Create a payjoin sender
     fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid);
+
+    /// Get a all active payjoin senders
+    fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid)>;
 }
 
 impl DatabaseConnection for SqliteConn {
@@ -422,6 +425,10 @@ impl DatabaseConnection for SqliteConn {
 
     fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
         self.create_payjoin_sender(bip21, spend_tx_id)
+    }
+
+    fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid)> {
+        self.get_all_payjoin_senders()
     }
 }
 
