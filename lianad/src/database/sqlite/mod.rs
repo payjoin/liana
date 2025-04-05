@@ -27,6 +27,7 @@ use crate::{
     },
 };
 use liana::descriptors::LianaDescriptor;
+use payjoin::receive::v2::Receiver;
 
 use std::{
     cmp,
@@ -1061,11 +1062,12 @@ impl SqliteConn {
     }
 
     /// Create a payjoin receiver, TODO: strong type to bitcoin::Address?
-    pub fn create_payjoin_receiver(&mut self, bip21: String) {
+    pub fn create_payjoin_receiver(&mut self, receiver: Receiver) {
+        let receiver_json = serde_json::to_string(&receiver).unwrap();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_receivers (bip21, status) VALUES (?1, ?2)",
-                rusqlite::params![bip21, PayjoinReceiverStatus::Pending as i32],
+                "INSERT INTO payjoin_receivers (receiver, status) VALUES (?1, ?2)",
+                rusqlite::params![receiver_json, PayjoinReceiverStatus::Pending as i32],
             )?;
             Ok(())
         })
@@ -1075,28 +1077,30 @@ impl SqliteConn {
 
     pub fn update_payjoin_receiver_status(
         &mut self,
-        bip21: String,
+        receiver: Receiver,
         status: PayjoinReceiverStatus,
     ) {
+        // HACK: just use receiver id integer
+        let receiver_json = serde_json::to_string(&receiver).unwrap();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "UPDATE payjoin_receivers SET status = ?1 WHERE bip21 = ?2",
-                rusqlite::params![status as i32, bip21],
+                "UPDATE payjoin_receivers SET status = ?1 WHERE receiver = ?2",
+                rusqlite::params![status as i32, receiver_json],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
     }
 
-    pub fn get_all_payjoin_receivers(&mut self) -> Vec<(String, PayjoinReceiverStatus)> {
+    pub fn get_all_payjoin_receivers(&mut self) -> Vec<Receiver> {
         db_query(
             &mut self.conn,
-            "SELECT bip21, status FROM payjoin_receivers WHERE status = ?1",
+            "SELECT receiver, status FROM payjoin_receivers WHERE status = ?1",
             rusqlite::params![PayjoinReceiverStatus::Pending as i32],
             |row| {
-                let bip21: String = row.get(0)?;
-                let status: i32 = row.get(1)?;
-                Ok((bip21, PayjoinReceiverStatus::from(status)))
+                let receiver_json: String = row.get(0)?;
+                let receiver: Receiver = serde_json::from_str(&receiver_json).unwrap();
+                Ok(receiver)
             },
         )
         .expect("Db must not fail")
@@ -1115,6 +1119,9 @@ mod tests {
     };
 
     use bitcoin::{bip32, BlockHash, ScriptBuf, TxIn};
+    use payjoin::persist::NoopPersister;
+    use payjoin::receive::v2::NewReceiver;
+    use payjoin::OhttpKeys;
 
     // The database schema used by the first versions of Liana (database version 0). Used to test
     // migrations starting from the first version.
@@ -1368,7 +1375,7 @@ CREATE TABLE payjoin_senders (
 
 CREATE TABLE payjoin_receivers (
     id INTEGER PRIMARY KEY NOT NULL,
-    bip21 TEXT NOT NULL,
+    receiver TEXT NOT NULL,
     status INTEGER NOT NULL CHECK (status IN (0,1,2))
 );
 
@@ -1445,14 +1452,18 @@ CREATE TABLE payjoin_receivers (
     fn can_create_and_update_payjoin_receiver() {
         let (_, _, _, db) = dummy_db();
         let mut conn = db.connection().unwrap();
-        let bip21 = "bip21".to_string();
-        conn.create_payjoin_receiver(bip21.clone());
+        let address = bitcoin::Address::from_str("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa").unwrap().assume_checked();
+
+        let ohttp_keys = OhttpKeys::from_str("OH1QYPC9XYSF5FGTJRN77U768VJKHJFLCDC9UDTP7U59EF3WATMKQJWT3S").unwrap();
+        let receiver = NewReceiver::new(address, "http://payjoin.example.com", ohttp_keys, None).unwrap();
+        let token = receiver.persist(&mut NoopPersister).unwrap();
+        let receiver = Receiver::load(token, &NoopPersister).unwrap();
+        conn.create_payjoin_receiver(receiver.clone());
         let payjoin_receivers = conn.get_all_payjoin_receivers();
         assert_eq!(payjoin_receivers.len(), 1);
-        assert_eq!(payjoin_receivers[0].0, bip21);
-        assert_eq!(payjoin_receivers[0].1, PayjoinReceiverStatus::Pending);
+        assert_eq!(payjoin_receivers[0], receiver);
 
-        conn.update_payjoin_receiver_status(bip21.clone(), PayjoinReceiverStatus::Completed);
+        conn.update_payjoin_receiver_status(receiver.clone(), PayjoinReceiverStatus::Completed);
         let payjoin_receivers = conn.get_all_payjoin_receivers();
         assert_eq!(payjoin_receivers.len(), 0);
     }

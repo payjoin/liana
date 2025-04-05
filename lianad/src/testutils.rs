@@ -8,6 +8,7 @@ use crate::{
     DaemonControl, DaemonHandle,
 };
 use liana::descriptors;
+use payjoin::receive::v2::Receiver;
 
 use std::convert::TryInto;
 use std::{
@@ -206,24 +207,27 @@ impl DummyDatabase {
 
 impl DatabaseConnection for DummyDatabase {
 
-    fn create_payjoin_receiver(&mut self, address: String) {
+    fn create_payjoin_receiver(&mut self, receiver: Receiver) {
+        let bip21 = receiver.pj_uri().to_string();
         self.db
             .write()
             .unwrap()
             .payjoin_receivers
-            .insert(address, PayjoinReceiverStatus::Pending);
+            .insert(bip21, PayjoinReceiverStatus::Pending);
     }
 
-    fn update_payjoin_receiver_status(&mut self, address: String, status: PayjoinReceiverStatus) {
+    fn update_payjoin_receiver_status(&mut self, receiver: Receiver, status: PayjoinReceiverStatus) {
+        let bip21 = receiver.pj_uri().to_string();
         self.db
             .write()
             .unwrap()
             .payjoin_receivers
-            .insert(address, status);
+            .insert(bip21, status);
     }
 
-    fn get_all_payjoin_receivers(&mut self) -> Vec<(String, PayjoinReceiverStatus)> {
-        self.db.read().unwrap().payjoin_receivers.clone().into_iter().collect()
+    fn get_all_payjoin_receivers(&mut self) -> Vec<Receiver> {
+        todo!()
+        // self.db.read().unwrap().payjoin_receivers.clone().into_iter().collect()
     }
 
     fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {

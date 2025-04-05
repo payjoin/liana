@@ -45,7 +45,6 @@ use miniscript::{
         bip32::{self, ChildNumber},
         psbt::Psbt,
     },
-    psbt::PsbtExt,
 };
 use serde::{Deserialize, Serialize};
 

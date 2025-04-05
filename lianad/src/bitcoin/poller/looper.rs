@@ -1,24 +1,31 @@
 use crate::{
     bitcoin::{BitcoinInterface, BlockChainTip, UTxO, UTxOAddress},
-    database::{sqlite::PayjoinSenderStatus, Coin, DatabaseConnection, DatabaseInterface},
+    database::{
+        sqlite::PayjoinSenderStatus, Coin, CoinStatus, DatabaseConnection, DatabaseInterface,
+    },
 };
 
 use std::{
     collections::HashSet,
     convert::{TryFrom, TryInto},
+    path::Path,
     str::FromStr,
     sync, thread, time,
 };
 
-use liana::descriptors;
+use liana::{descriptors, signer::HotSigner};
 use log::{info, warn};
 use miniscript::{
     bitcoin::{self, secp256k1},
     psbt::PsbtExt,
 };
 use payjoin::{
-    bitcoin::FeeRate,
+    bitcoin::{secp256k1::SECP256K1, FeeRate, Psbt, ScriptBuf, Sequence, TxIn, Witness},
     persist::NoopPersister,
+    receive::{
+        v2::{NewReceiver, Receiver, UncheckedProposal},
+        InputPair,
+    },
     send::v2::{Sender, SenderBuilder},
     Uri, UriExt, Url,
 };
@@ -442,7 +449,9 @@ fn payjoin_sender_check(
         // Clone the psbt to finalize, and copy over the witness,
         // this is bc finalize mut will remove those fields and we need them again when we sign the pj psbt
         let mut psbt_to_finalize = psbt.clone();
-        psbt_to_finalize.finalize_mut(secp).expect("finalize should work");
+        psbt_to_finalize
+            .finalize_mut(secp)
+            .expect("finalize should work");
 
         for (i, input) in psbt_to_finalize.inputs.iter_mut().enumerate() {
             psbt.inputs[i].final_script_sig = input.final_script_sig.clone();
@@ -453,7 +462,6 @@ fn payjoin_sender_check(
         let psbt_string = psbt.to_string();
         info!("<<<<<< PSBT being sent to receiver: {:?}", psbt_string);
 
-        
         let new_sender = SenderBuilder::new(psbt, pj_uri)
             .build_recommended(FeeRate::BROADCAST_MIN)
             .expect("Failed to build sender");
@@ -482,9 +490,7 @@ fn payjoin_sender_check(
             resp.bytes().expect("Failed to read response").as_ref(),
             ohttp_ctx,
         ) {
-            Ok(Some(psbt)) => {
-                psbt
-            }
+            Ok(Some(psbt)) => psbt,
             Ok(None) => {
                 // nothing to do yet, no response
                 continue;
@@ -495,7 +501,7 @@ fn payjoin_sender_check(
                 continue;
             }
         };
-        // Store updated Payjoin psbt 
+        // Store updated Payjoin psbt
         db_conn.store_spend(&psbt);
         info!("Updated Payjoin psbt for txid: {}", txid);
 
@@ -507,6 +513,87 @@ fn payjoin_sender_check(
     }
 }
 
+fn process_pj_receive(
+    proposal: &UncheckedProposal,
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    desc: &descriptors::SinglePathLianaDesc,
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) -> Psbt {
+    let network = db_conn.network();
+    let proposal = proposal.clone()
+        .check_broadcast_suitability(None, |x| Ok(true))
+        .expect("Failed to check broadcast suitability");
+    let proposal = proposal
+        .check_inputs_not_owned(|input| Ok(true))
+        .expect("Failed to check inputs not owned");
+    let proposal = proposal
+        .check_no_inputs_seen_before(|input| Ok(true))
+        .expect("Failed to check no inputs seen before");
+    let proposal = proposal
+        .identify_receiver_outputs(|outputs| Ok(true))
+        .expect("Failed to identify receiver outputs");
+
+    let path = Path::new("~/.lianad/regtest/");
+    let wallet = &HotSigner::from_datadir(path, network).expect("Failed to load wallet")[0];
+    // let drain_script = desc.derive(wallet.change_index, secp).address(network);
+    // let proposal = proposal.replace_receiver_outputs(vec![], &drain_script.script_pubkey()).expect("Failed to replace receiver outputs");
+    // let psbt = proposal.psbt();
+    // let address = db_conn.
+    let proposal = proposal.commit_outputs();
+    let coins = db_conn.coins(&[CoinStatus::Unconfirmed], &[]);
+    // let mut inputs = vec![];
+    // for coin in coins.values() {
+    //     let txin = TxIn {
+    //         previous_output: coin.outpoint,
+    //         script_sig: ScriptBuf::new(),
+    //         sequence: Sequence::MAX,
+    //         witness: Witness::new(),
+    //     };
+    //     inputs.push(InputPair::new(txin, coin.amount).unwrap());
+    // }
+
+    // let proposal = proposal.contribute_inputs(inputs).unwrap().commit_inputs();
+    let proposal = proposal.commit_inputs();
+
+    let proposal = proposal
+        .finalize_proposal(
+            |psbt| {
+                let mut psbt = psbt;
+                let secp = SECP256K1;
+                wallet.sign_psbt(psbt.clone(), &secp).expect("Failed to sign psbt");
+                Ok(psbt.clone())
+            },
+            None,
+            None,
+        )
+        .expect("Failed to finalize proposal");
+
+    let psbt = proposal.psbt();
+    let psbt_string = psbt.to_string();
+    info!("<<<<<< PSBT being sent to receiver: {:?}", psbt_string);
+
+    psbt.clone()
+}
+
+pub fn payjoin_receiver_check(db_conn: &mut Box<dyn DatabaseConnection>, secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>, desc: &descriptors::SinglePathLianaDesc) {
+    let mut payjoin_receivers = db_conn.get_all_payjoin_receivers();
+    for receiver in payjoin_receivers.iter_mut() {
+        let (req, ctx) = receiver
+            .extract_req(Url::from_str(OHTTP_RELAY).expect("Invalid OHTTP relay"))
+            .expect("Failed to extract request");
+        let resp = post_request(req);
+
+        let proposal = receiver
+            .process_res(resp.bytes().expect("Failed to read response").as_ref(), ctx)
+            .expect("Failed to process response");
+        if let Some(proposal) = proposal {
+            let psbt = process_pj_receive(&proposal, db_conn, desc, secp);
+            // TODO Respond to directgory
+        } else {
+            info!("empty proposal")
+        }
+    }
+}
 /// Update our state from the Bitcoin backend.
 pub fn poll(
     bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
@@ -518,6 +605,9 @@ pub fn poll(
     updates(&mut db_conn, bit, descs, secp);
     rescan_check(&mut db_conn, bit, descs, secp);
     payjoin_sender_check(&mut db_conn, secp);
+    if descs.len() > 0 {
+        payjoin_receiver_check(&mut db_conn, secp, &descs[0]);
+    }
     let now: u32 = time::SystemTime::now()
         .duration_since(time::UNIX_EPOCH)
         .expect("current system time must be later than epoch")

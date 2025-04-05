@@ -134,7 +134,7 @@ CREATE TABLE payjoin_senders (
 /* Payjoin receivers */
 CREATE TABLE payjoin_receivers (
     id INTEGER PRIMARY KEY NOT NULL,
-    bip21 TEXT NOT NULL,
+    receiver TEXT NOT NULL,
     status INTEGER NOT NULL CHECK (status IN (0,1,2))
 );
 ";
