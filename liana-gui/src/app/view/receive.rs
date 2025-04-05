@@ -23,6 +23,8 @@ use liana_ui::{
     widget::*,
 };
 
+use payjoin::{io::fetch_ohttp_keys, persist::NoopPersister, Url};
+
 use crate::{
     app::{
         error::Error,
@@ -56,6 +58,25 @@ pub fn receive<'a>(
                     Column::new().spacing(10).width(Length::Fill),
                     |col, (i, address)| {
                         let addr = address.to_string();
+
+                        // This is being called on every refresh...Move it to Cache or DB
+                        let ohttp_relay = Url::parse("https://pj.bobspacebkk.com").unwrap();
+                        let directory = Url::parse("https://payjo.in").unwrap();
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        let ohttp_keys = rt.block_on(async { fetch_ohttp_keys(ohttp_relay.clone(), directory.clone()).await }).unwrap();
+                        // ----
+
+                        let new_receiver = payjoin::receive::v2::NewReceiver::new(
+                            address.clone(),
+                            directory.clone(),
+                            ohttp_keys,
+                            Some(std::time::Duration::from_secs(600)),
+                        ).unwrap();
+
+                        let storage_token = new_receiver.persist(&mut NoopPersister).unwrap();
+                        let receiver = payjoin::receive::v2::Receiver::load(storage_token, &mut NoopPersister).unwrap();
+                        let payjoin_uri = receiver.pj_uri().to_string();
+
                         col.push(
                             card::simple(
                                 Column::new()
@@ -105,6 +126,43 @@ pub fn receive<'a>(
                                                         .style(theme::text::secondary),
                                                 )
                                                 .on_press(Message::Clipboard(address.to_string()))
+                                                .style(theme::button::transparent_border),
+                                            )
+                                            .align_y(Alignment::Center),
+                                    )
+                                    .push(
+                                        Row::new()
+                                            .push(
+                                                Container::new(
+                                                    scrollable(
+                                                        Column::new()
+                                                            .push(Space::with_height(
+                                                                Length::Fixed(10.0),
+                                                            ))
+                                                            .push(
+                                                                p2_regular(&payjoin_uri)
+                                                                    .small()
+                                                                    .style(theme::text::secondary),
+                                                            )
+                                                            // Space between the URI and the scrollbar
+                                                            .push(Space::with_height(
+                                                                Length::Fixed(10.0),
+                                                            )),
+                                                    )
+                                                    .direction(scrollable::Direction::Horizontal(
+                                                        scrollable::Scrollbar::new()
+                                                            .width(2)
+                                                            .scroller_width(2),
+                                                    )),
+                                                )
+                                                .width(Length::Fill),
+                                            )
+                                            .push(
+                                                Button::new(
+                                                    icon::clipboard_icon()
+                                                        .style(theme::text::secondary),
+                                                )
+                                                .on_press(Message::Clipboard(payjoin_uri))
                                                 .style(theme::button::transparent_border),
                                             )
                                             .align_y(Alignment::Center),
