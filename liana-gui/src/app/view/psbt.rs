@@ -358,13 +358,17 @@ pub fn spend_overview_view<'a>(
                                     )
                                     .align_y(Alignment::Center),
                             )
-                             .push_maybe(if let Some(bip21) = tx.bip21.clone() {
+                            .push_maybe(if let Some(bip21) = tx.bip21.clone() {
                                 Some(
                                     Row::new()
-                                        .push(p2_regular(bip21.to_string()).style(theme::text::secondary))
+                                        .push(
+                                            p2_regular(bip21.to_string())
+                                                .style(theme::text::secondary),
+                                        )
                                         .push(
                                             Button::new(
-                                                icon::clipboard_icon().style(theme::text::secondary),
+                                                icon::clipboard_icon()
+                                                    .style(theme::text::secondary),
                                             )
                                             .on_press(Message::Clipboard(bip21.to_string()))
                                             .style(theme::button::transparent_border),
@@ -438,7 +442,21 @@ pub fn signatures<'a>(
     keys_aliases: &'a HashMap<Fingerprint, String>,
 ) -> Element<'a, Message> {
     Column::new()
-        .push(if let Some(sigs) = tx.path_ready() {
+        .push(if tx.status == SpendStatus::PayjoinInitiated {
+            Container::new(scrollable(
+                Row::new()
+                    .spacing(5)
+                    .align_y(Alignment::Center)
+                    .spacing(10)
+                    .push(p1_bold("Status"))
+                    .push(icon::circle_check_icon().style(theme::text::warning))
+                    .push(
+                        text("      Payjoin initiated")
+                            .bold()
+                            .style(theme::text::warning),
+                    ),
+            ))
+        } else if let Some(sigs) = tx.path_ready() {
             Container::new(
                 scrollable(
                     Row::new()
