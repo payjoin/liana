@@ -433,13 +433,19 @@ impl LianaDescriptor {
         );
         let spend_info = self.partial_spend_info_txin(first_psbt_in, first_txin);
         for (psbt_in, txin) in psbt_ins.zip(txins) {
+            if psbt_in.final_script_sig.is_some() || psbt_in.final_script_witness.is_some() {
+                continue;
+            }
+            let spend_info = self.partial_spend_info_txin(psbt_in, txin);
+            return Ok(spend_info);
             // TODO: maybe it's better to not error if one of the input has more, or different
             // signatures? Instead of erroring we could ignore the superfluous data?
-            if txin.sequence != first_txin.sequence
-                || spend_info != self.partial_spend_info_txin(psbt_in, txin)
-            {
-                return Err(LianaDescError::InconsistentPsbt);
-            }
+            // HACK: this breaks for foreign payjoin inputs
+            // if txin.sequence != first_txin.sequence
+            //     || spend_info != self.partial_spend_info_txin(psbt_in, txin)
+            // {
+            //     return Err(LianaDescError::InconsistentPsbt);
+            // }
         }
 
         Ok(spend_info)
