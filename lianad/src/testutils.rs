@@ -234,6 +234,10 @@ impl DatabaseConnection for DummyDatabase {
             .insert(spend_tx_id, (value.0.clone(), status));
     }
 
+    fn update_spend_tx(&mut self, txid: bitcoin::Txid, psbt: &Psbt) {
+        self.db.write().unwrap().spend_txs.insert(txid, (psbt.clone(), None));
+    }
+
     fn network(&mut self) -> bitcoin::Network {
         bitcoin::Network::Bitcoin
     }
