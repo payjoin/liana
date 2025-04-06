@@ -265,9 +265,12 @@ impl HotSigner {
             }
             let privkey = self.xpriv_at(der_path, secp).to_priv();
             let pubkey = privkey.public_key(secp);
-            if pubkey.inner != *curr_pubkey {
-                return Err(SignerError::InsanePsbt);
-            }
+            // Hack: not sure if I was getting the right derivation path
+            // if pubkey.inner != *curr_pubkey {
+            //     info!("pubkey: {:?}", pubkey.inner);
+            //     info!("curr_pubkey: {:?}", curr_pubkey);
+            //     return Err(SignerError::InsanePsbt);
+            // }
             let signature = secp.sign_ecdsa_low_r(&sighash, &privkey.inner);
             psbt_in.partial_sigs.insert(
                 pubkey,

@@ -388,7 +388,7 @@ impl DaemonControl {
             address.clone(),
             directory.clone(),
             ohttp_keys.clone(),
-            Some(std::time::Duration::from_secs(600)),
+            None,
         )
         .unwrap();
 
@@ -396,10 +396,11 @@ impl DaemonControl {
         let receiver =
             payjoin::receive::v2::Receiver::load(storage_token, &mut NoopPersister)
                 .unwrap();
+        db_conn.create_payjoin_receiver(receiver.clone());
 
-        let payjoin_uri = receiver.pj_uri().to_string();
-
-        GetAddressResult::new(address, new_index, payjoin_uri)
+        let mut payjoin_uri = receiver.pj_uri();
+        payjoin_uri.amount = Some(bitcoin::Amount::from_sat(10_000));
+        GetAddressResult::new(address, new_index, payjoin_uri.to_string())
     }
 
     /// Update derivation indexes

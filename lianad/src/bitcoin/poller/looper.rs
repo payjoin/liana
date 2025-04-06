@@ -17,13 +17,19 @@ use liana::{descriptors, signer::HotSigner};
 use log::{info, warn};
 use miniscript::{
     bitcoin::{self, secp256k1},
-    psbt::PsbtExt,
+    psbt::{self, PsbtExt},
+    ToPublicKey,
 };
 use payjoin::{
-    bitcoin::{secp256k1::SECP256K1, FeeRate, Psbt, ScriptBuf, Sequence, TxIn, Witness},
+    bitcoin::{
+        bip32::{DerivationPath, Fingerprint},
+        psbt::Input,
+        secp256k1::SECP256K1,
+        FeeRate, Psbt, ScriptBuf, Sequence, TxIn, Witness,
+    },
     persist::NoopPersister,
     receive::{
-        v2::{NewReceiver, Receiver, UncheckedProposal},
+        v2::{NewReceiver, PayjoinProposal, Receiver, UncheckedProposal},
         InputPair,
     },
     send::v2::{Sender, SenderBuilder},
@@ -513,82 +519,247 @@ fn payjoin_sender_check(
     }
 }
 
+fn extract_fingerprint(descriptor: &str) -> Option<String> {
+    // Look for the pattern [XXXXXXXX/48'/1'/0'/2']
+    let start = descriptor.find('[')?;
+    let end = descriptor[start..].find(']')?;
+    let fingerprint_part = &descriptor[start..start + end + 1];
+
+    // Extract just the fingerprint portion between [ and first /
+    let slash_pos = fingerprint_part.find('/')?;
+    let fingerprint = &fingerprint_part[1..slash_pos];
+
+    // Validate it's 8 hex chars
+    if fingerprint.len() == 8 && fingerprint.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(fingerprint.to_string())
+    } else {
+        None
+    }
+}
+
+fn get_descriptor_pubkeys(
+    desc: &miniscript::Descriptor<miniscript::descriptor::DescriptorPublicKey>,
+    derivation_index: u32,
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) -> Vec<secp256k1::PublicKey> {
+    let derived_desc = desc
+        .at_derivation_index(derivation_index.into())
+        .expect("Failed to derive descriptor")
+        .derived_descriptor(secp)
+        .expect("Failed to get derived descriptor");
+
+    let mut pubkeys = Vec::new();
+
+    match derived_desc {
+        miniscript::Descriptor::Wsh(wsh) => {
+            match wsh.into_inner() {
+                miniscript::descriptor::WshInner::SortedMulti(multi) => {
+                    // For sorted multi, we can directly get the keys
+                    pubkeys.extend(multi.pks().iter().map(|pk| pk.to_public_key()));
+                }
+                miniscript::descriptor::WshInner::Ms(ms) => {
+                    // Extract keys from the Miniscript
+                    ms.iter_pk().for_each(|pk| {
+                        pubkeys.push(pk.to_public_key());
+                    });
+                }
+            }
+        }
+        // Add other cases as needed
+        _ => panic!("Unsupported descriptor type"),
+    }
+
+    pubkeys.iter().map(|pk| pk.inner).collect()
+}
+
+fn finalize_psbt(mut psbt: Psbt) -> Psbt {
+    for input in psbt.inputs.iter_mut() {
+        if input.final_script_sig.is_some() || input.final_script_witness.is_some() {
+            continue;
+        }
+
+        if input.bip32_derivation.is_empty() {
+            continue;
+        }
+
+        let bip32 = input
+            .bip32_derivation
+            .values()
+            .map(|bip32| bip32.clone().1)
+            .collect::<Vec<_>>();
+        // Need to get the index of the pk of the main spending path which s derived at m/48'/1'/0'/2'/1/X
+        // The recovery key is derived at m/48'/1'/0'/2'/3/X
+
+        let sigs = input
+            .partial_sigs
+            .values()
+            .map(|sig| sig)
+            .collect::<Vec<_>>();
+        let sig_pk = sigs.get(0).unwrap();
+
+        let witness_script = input
+            .witness_script
+            .as_ref()
+            .expect("p2wsh should always have witness script");
+        info!("witness_script: {}", witness_script.to_asm_string());
+
+        let mut witness: Witness = Witness::new();
+        witness.push_ecdsa_signature(sig_pk);
+        witness.push(witness_script);
+
+        input.final_script_witness = Some(witness);
+    }
+
+    psbt
+}
+
 fn process_pj_receive(
     proposal: &UncheckedProposal,
     db_conn: &mut Box<dyn DatabaseConnection>,
     desc: &descriptors::SinglePathLianaDesc,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
-) -> Psbt {
+    bitcoind: &mut impl BitcoinInterface,
+) -> PayjoinProposal {
     let network = db_conn.network();
-    let proposal = proposal.clone()
+    // HACK: Each one of these checks is neccecary way to ensure you are doing payjoin securely, for the prupose of this hackathon project, we are not going to do them
+    let proposal = proposal
+        .clone()
         .check_broadcast_suitability(None, |x| Ok(true))
         .expect("Failed to check broadcast suitability");
     let proposal = proposal
-        .check_inputs_not_owned(|input| Ok(true))
+        .check_inputs_not_owned(|_input| Ok(false))
         .expect("Failed to check inputs not owned");
     let proposal = proposal
-        .check_no_inputs_seen_before(|input| Ok(true))
+        .check_no_inputs_seen_before(|input| Ok(false))
         .expect("Failed to check no inputs seen before");
     let proposal = proposal
         .identify_receiver_outputs(|outputs| Ok(true))
         .expect("Failed to identify receiver outputs");
 
-    let path = Path::new("~/.lianad/regtest/");
-    let wallet = &HotSigner::from_datadir(path, network).expect("Failed to load wallet")[0];
+    // HACK: hardcoded path should be coming from a config
+    let path = Path::new("/home/hash160/.liana");
+    let wallets = HotSigner::from_datadir(path, network).expect("Failed to load wallet");
+    assert!(wallets.len() <= 1, "No wallets found");
+    let wallet = &wallets[0];
     // let drain_script = desc.derive(wallet.change_index, secp).address(network);
     // let proposal = proposal.replace_receiver_outputs(vec![], &drain_script.script_pubkey()).expect("Failed to replace receiver outputs");
     // let psbt = proposal.psbt();
     // let address = db_conn.
     let proposal = proposal.commit_outputs();
-    let coins = db_conn.coins(&[CoinStatus::Unconfirmed], &[]);
-    // let mut inputs = vec![];
-    // for coin in coins.values() {
-    //     let txin = TxIn {
-    //         previous_output: coin.outpoint,
-    //         script_sig: ScriptBuf::new(),
-    //         sequence: Sequence::MAX,
-    //         witness: Witness::new(),
-    //     };
-    //     inputs.push(InputPair::new(txin, coin.amount).unwrap());
-    // }
+    let coins = db_conn.coins(&[CoinStatus::Confirmed], &[]);
+    let mut inputs = vec![];
+    for coin in coins.values() {
+        let txin = TxIn {
+            previous_output: coin.outpoint,
+            script_sig: ScriptBuf::new(),
+            sequence: Default::default(),
+            witness: Witness::new(),
+        };
+        let prev_tx = bitcoind
+            .wallet_transaction(&coin.outpoint.txid)
+            .expect("Failed to get previous transaction");
+        let prev_out = prev_tx.0.output[coin.outpoint.vout as usize].clone();
+        let mut psbt_in = Input::default();
+        psbt_in.witness_utxo = Some(prev_out.clone());
+        psbt_in.non_witness_utxo = Some(prev_tx.0);
 
-    // let proposal = proposal.contribute_inputs(inputs).unwrap().commit_inputs();
-    let proposal = proposal.commit_inputs();
+        let address = desc
+            .as_descriptor_public_key()
+            .derived_descriptor(secp, coin.derivation_index.into())
+            .expect("Failed to derive descriptor")
+            .address(network)
+            .unwrap()
+            .script_pubkey();
 
+        let spk = prev_out.script_pubkey;
+        psbt_in.witness_script = Some(spk.clone());
+
+        assert!(spk == address, "SPK and address mismatch");
+        // let change_path = if coin.is_change { 1 } else { 0 };
+        let change_path = 1;
+        let last_used_index = coin.derivation_index;
+        // let spk = desc.derive(last_used_index, secp).script_pubkey();
+
+        // m/48'/1'/0'/2'/1/X
+        let finger_print = extract_fingerprint(&desc.to_string()).unwrap();
+        let finger_print = Fingerprint::from_str(&finger_print).unwrap();
+
+        let derivation_path = DerivationPath::from_str(
+            format!("m/48'/1'/0'/2'/{}/{}", change_path, last_used_index).as_str(),
+        )
+        .unwrap();
+        info!("derivation_path: {:?}", derivation_path);
+
+        let pubkeys = get_descriptor_pubkeys(
+            &desc.as_descriptor_public_key(),
+            last_used_index.into(),
+            secp,
+        );
+        info!("pubkeys: {:?}", pubkeys);
+
+        psbt_in
+            .bip32_derivation
+            .insert(pubkeys[0], (finger_print, derivation_path));
+        inputs.push(InputPair::new(txin, psbt_in).unwrap());
+    }
+
+    let proposal = proposal.contribute_inputs(inputs).unwrap().commit_inputs();
     let proposal = proposal
         .finalize_proposal(
             |psbt| {
-                let mut psbt = psbt;
                 let secp = SECP256K1;
-                wallet.sign_psbt(psbt.clone(), &secp).expect("Failed to sign psbt");
+                let psbt = wallet
+                    .sign_psbt(psbt.clone(), &secp)
+                    .expect("Failed to sign psbt");
+                let psbt = finalize_psbt(psbt);
                 Ok(psbt.clone())
             },
             None,
-            None,
+            Some(FeeRate::from_sat_per_vb(150).unwrap()),
         )
         .expect("Failed to finalize proposal");
 
     let psbt = proposal.psbt();
     let psbt_string = psbt.to_string();
-    info!("<<<<<< PSBT being sent to receiver: {:?}", psbt_string);
+    info!("<<<<<< PSBT being sent to sender: {:?}", psbt_string);
 
-    psbt.clone()
+    proposal
 }
 
-pub fn payjoin_receiver_check(db_conn: &mut Box<dyn DatabaseConnection>, secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>, desc: &descriptors::SinglePathLianaDesc) {
+pub fn payjoin_receiver_check(
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+    desc: &descriptors::SinglePathLianaDesc,
+    bitcoind: &mut impl BitcoinInterface,
+) {
     let mut payjoin_receivers = db_conn.get_all_payjoin_receivers();
     for receiver in payjoin_receivers.iter_mut() {
+        info!("Payjoin receiver: {}", receiver.pj_uri());
         let (req, ctx) = receiver
             .extract_req(Url::from_str(OHTTP_RELAY).expect("Invalid OHTTP relay"))
             .expect("Failed to extract request");
         let resp = post_request(req);
-
         let proposal = receiver
             .process_res(resp.bytes().expect("Failed to read response").as_ref(), ctx)
             .expect("Failed to process response");
         if let Some(proposal) = proposal {
-            let psbt = process_pj_receive(&proposal, db_conn, desc, secp);
-            // TODO Respond to directgory
+            info!("Payjoin receiver proposal: {:?}", proposal);
+            let mut proposal = process_pj_receive(&proposal, db_conn, desc, secp, bitcoind);
+            let (req, ctx) = proposal
+                .extract_req(Url::from_str(OHTTP_RELAY).expect("Invalid OHTTP relay"))
+                .expect("Failed to extract request");
+
+            // Respond to sender
+            let resp = post_request(req);
+            let proposal = receiver
+                .process_res(resp.bytes().expect("Failed to read response").as_ref(), ctx)
+                .expect("Failed to process response");
+
+            if let Some(proposal) = proposal {
+                info!("Payjoin receiver proposal: {:?}", proposal);
+            } else {
+                info!("empty proposal")
+            }
         } else {
             info!("empty proposal")
         }
@@ -605,8 +776,9 @@ pub fn poll(
     updates(&mut db_conn, bit, descs, secp);
     rescan_check(&mut db_conn, bit, descs, secp);
     payjoin_sender_check(&mut db_conn, secp);
+    info!("descs: {:?}", descs);
     if descs.len() > 0 {
-        payjoin_receiver_check(&mut db_conn, secp, &descs[0]);
+        payjoin_receiver_check(&mut db_conn, secp, &descs[0], bit);
     }
     let now: u32 = time::SystemTime::now()
         .duration_since(time::UNIX_EPOCH)
