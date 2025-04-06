@@ -34,6 +34,7 @@ use std::{
     collections::{HashMap, HashSet},
     convert::TryInto,
     fmt, io, path,
+    str::FromStr,
 };
 
 use miniscript::bitcoin::{
@@ -1062,18 +1063,22 @@ impl SqliteConn {
     }
 
     /// Create a payjoin receiver, TODO: strong type to bitcoin::Address?
-    pub fn create_payjoin_receiver(&mut self, receiver: Receiver) {
+    pub fn create_payjoin_receiver(&mut self, receiver: Receiver, psbt: Psbt) {
         let receiver_json = serde_json::to_string(&receiver).unwrap();
+        let psbt_str = psbt.to_string();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_receivers (receiver, status) VALUES (?1, ?2)",
-                rusqlite::params![receiver_json, PayjoinReceiverStatus::Pending as i32],
+                "INSERT INTO payjoin_receivers (receiver, status, psbt) VALUES (?1, ?2, ?3)",
+                rusqlite::params![
+                    receiver_json,
+                    PayjoinReceiverStatus::Pending as i32,
+                    psbt_str
+                ],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
     }
-
 
     pub fn update_payjoin_receiver_status(
         &mut self,
@@ -1092,15 +1097,17 @@ impl SqliteConn {
         .expect("Db must not fail");
     }
 
-    pub fn get_all_payjoin_receivers(&mut self) -> Vec<Receiver> {
+    pub fn get_all_payjoin_receivers(&mut self) -> Vec<(Receiver, Psbt)> {
         db_query(
             &mut self.conn,
-            "SELECT receiver, status FROM payjoin_receivers WHERE status = ?1",
+            "SELECT receiver, status, psbt FROM payjoin_receivers WHERE status = ?1",
             rusqlite::params![PayjoinReceiverStatus::Pending as i32],
             |row| {
                 let receiver_json: String = row.get(0)?;
                 let receiver: Receiver = serde_json::from_str(&receiver_json).unwrap();
-                Ok(receiver)
+                let psbt: String = row.get(2)?;
+                let psbt: Psbt = Psbt::from_str(&psbt).unwrap();
+                Ok((receiver, psbt))
             },
         )
         .expect("Db must not fail")
@@ -1376,7 +1383,8 @@ CREATE TABLE payjoin_senders (
 CREATE TABLE payjoin_receivers (
     id INTEGER PRIMARY KEY NOT NULL,
     receiver TEXT NOT NULL,
-    status INTEGER NOT NULL CHECK (status IN (0,1,2))
+    status INTEGER NOT NULL CHECK (status IN (0,1,2)),
+    psbt TEXT NOT NULL
 );
 
 ";
@@ -1452,16 +1460,23 @@ CREATE TABLE payjoin_receivers (
     fn can_create_and_update_payjoin_receiver() {
         let (_, _, _, db) = dummy_db();
         let mut conn = db.connection().unwrap();
-        let address = bitcoin::Address::from_str("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa").unwrap().assume_checked();
+        let address = bitcoin::Address::from_str("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")
+            .unwrap()
+            .assume_checked();
+        let first_psbt = psbt_from_str("cHNidP8BAIkCAAAAAWi3OFgkj1CqCDT3Swm8kbxZS9lxz4L3i4W2v9KGC7nqAQAAAAD9////AkANAwAAAAAAIgAg27lNc1rog+dOq80ohRuds4Hgg/RcpxVun2XwgpuLSrFYMwwAAAAAACIAIDyWveqaElWmFGkTbFojg1zXWHODtiipSNjfgi2DqBy9AAAAAAABAOoCAAAAAAEBsRWl70USoAFFozxc86pC7Dovttdg4kvja//3WMEJskEBAAAAAP7///8CWKmCIk4GAAAWABRKBWYWkCNS46jgF0r69Ehdnq+7T0BCDwAAAAAAIgAgTt5fs+CiB+FRzNC8lHcgWLH205sNjz1pT59ghXlG5tQCRzBEAiBXK9MF8z3bX/VnY2aefgBBmiAHPL4tyDbUOe7+KpYA4AIgL5kU0DFG8szKd+szRzz/OTUWJ0tZqij41h2eU9rSe1IBIQNBB1hy+jKsg1TihMT0dXw7etpu9TkO3NuvhBDFJlBj1cP2AQABAStAQg8AAAAAACIAIE7eX7PgogfhUczQvJR3IFix9tObDY89aU+fYIV5RubUIgICSKJsNs0zFJN58yd2aYQ+C3vhMbi0x7k0FV3wBhR4THlIMEUCIQCPWWWOhs2lThxOq/G8X2fYBRvM9MXSm7qPH+dRVYQZEwIgfut2vx3RvwZWcgEj4ohQJD5lNJlwOkA4PAiN1fjx6dABIgID3mvj1zerZKohOVhKCiskYk+3qrCum6PIwDhQ16ePACpHMEQCICZNR+0/1hPkrDQwPFmg5VjUHkh6aK9cXUu3kPbM8hirAiAyE/5NUXKfmFKij30isuyysJbq8HrURjivd+S9vdRGKQEBBZNSIQJIomw2zTMUk3nzJ3ZphD4Le+ExuLTHuTQVXfAGFHhMeSEC9OfCXl+sJOrxUFLBuMV4ZUlJYjuzNGZSld5ioY14y8FSrnNkUSED3mvj1zerZKohOVhKCiskYk+3qrCum6PIwDhQ16ePACohA+ECH+HlR+8Sf3pumaXH3IwSsoqSLCH7H1THiBP93z3ZUq9SsmgiBgJIomw2zTMUk3nzJ3ZphD4Le+ExuLTHuTQVXfAGFHhMeRxjat8/MAAAgAEAAIAAAACAAgAAgAAAAAABAAAAIgYC9OfCXl+sJOrxUFLBuMV4ZUlJYjuzNGZSld5ioY14y8Ec/9Y8jTAAAIABAACAAAAAgAIAAIAAAAAAAQAAACIGA95r49c3q2SqITlYSgorJGJPt6qwrpujyMA4UNenjwAqHGNq3z8wAACAAQAAgAEAAIACAACAAAAAAAEAAAAiBgPhAh/h5UfvEn96bpmlx9yMErKKkiwh+x9Ux4gT/d892Rz/1jyNMAAAgAEAAIABAACAAgAAgAAAAAABAAAAACICAlBQ7gGocg7eF3sXrCio+zusAC9+xfoyIV95AeR69DWvHGNq3z8wAACAAQAAgAEAAIACAACAAAAAAAMAAAAiAgMvVy984eg8Kgvj058PBHetFayWbRGb7L0DMnS9KHSJzBxjat8/MAAAgAEAAIAAAACAAgAAgAAAAAADAAAAIgIDSRIG1dn6njdjsDXenHa2lUvQHWGPLKBVrSzbQOhiIxgc/9Y8jTAAAIABAACAAAAAgAIAAIAAAAAAAwAAACICA0/epE59sVEj7Et0I4R9qJQNuX23RNvDZKCRL7eUps9FHP/WPI0wAACAAQAAgAEAAIACAACAAAAAAAMAAAAAIgICgldCOK6iHscv//2NipgaMABLV5TICU/zlP7HlQmlg08cY2rfPzAAAIABAACAAQAAgAIAAIABAAAAAQAAACICApb0p9rfpJshB3J186PGWrvzQdixcwQZWmebOUMdkquZHP/WPI0wAACAAQAAgAAAAIACAACAAQAAAAEAAAAiAgLY5q+unoDxC/HI5BaNiPq12ei1REZIcUAN304JfKXUwxz/1jyNMAAAgAEAAIABAACAAgAAgAEAAAABAAAAIgIDg6cUVCJB79cMcofiURHojxFARWyS4YEhJNRixuOZZRgcY2rfPzAAAIABAACAAAAAgAIAAIABAAAAAQAAAAA=");
 
-        let ohttp_keys = OhttpKeys::from_str("OH1QYPC9XYSF5FGTJRN77U768VJKHJFLCDC9UDTP7U59EF3WATMKQJWT3S").unwrap();
-        let receiver = NewReceiver::new(address, "http://payjoin.example.com", ohttp_keys, None).unwrap();
+        let ohttp_keys =
+            OhttpKeys::from_str("OH1QYPC9XYSF5FGTJRN77U768VJKHJFLCDC9UDTP7U59EF3WATMKQJWT3S")
+                .unwrap();
+        let receiver =
+            NewReceiver::new(address, "http://payjoin.example.com", ohttp_keys, None).unwrap();
         let token = receiver.persist(&mut NoopPersister).unwrap();
         let receiver = Receiver::load(token, &NoopPersister).unwrap();
-        conn.create_payjoin_receiver(receiver.clone());
+        conn.create_payjoin_receiver(receiver.clone(), first_psbt.clone());
         let payjoin_receivers = conn.get_all_payjoin_receivers();
         assert_eq!(payjoin_receivers.len(), 1);
-        assert_eq!(payjoin_receivers[0], receiver);
+        assert_eq!(payjoin_receivers[0].0, receiver);
+        assert_eq!(payjoin_receivers[0].1, first_psbt);
 
         conn.update_payjoin_receiver_status(receiver.clone(), PayjoinReceiverStatus::Completed);
         let payjoin_receivers = conn.get_all_payjoin_receivers();
@@ -1477,11 +1492,12 @@ CREATE TABLE payjoin_receivers (
         let mut conn = db.connection().unwrap();
         let txid = bitcoin::Txid::from_str(
             "0c62a990d20d54429e70859292e82374ba6b1b951a3ab60f26bb65fee5724ff7",
-        ).unwrap();
+        )
+        .unwrap();
         // Create a spend transaction
         conn.store_spend(&first_psbt);
         conn.update_spend_tx(txid, &second_psbt);
-    } 
+    }
 
     // All values required to store a coin in the V3 schema DB (including `id` column).
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

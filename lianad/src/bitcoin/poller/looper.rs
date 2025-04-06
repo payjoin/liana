@@ -1,7 +1,7 @@
 use crate::{
     bitcoin::{BitcoinInterface, BlockChainTip, UTxO, UTxOAddress},
     database::{
-        sqlite::PayjoinSenderStatus, Coin, CoinStatus, DatabaseConnection, DatabaseInterface,
+        sqlite::{PayjoinReceiverStatus, PayjoinSenderStatus}, Coin, CoinStatus, DatabaseConnection, DatabaseInterface,
     },
 };
 
@@ -513,63 +513,7 @@ fn payjoin_sender_check(
 
         // Mark the sender as completed
         db_conn.update_payjoin_sender_status(txid, PayjoinSenderStatus::Completed);
-
-        // TODO: check if the response is valid, and if so, update the psbt for this spend tx.
-        // USer will need to sign again
     }
-}
-
-fn extract_fingerprint(descriptor: &str) -> Option<String> {
-    // Look for the pattern [XXXXXXXX/48'/1'/0'/2']
-    let start = descriptor.find('[')?;
-    let end = descriptor[start..].find(']')?;
-    let fingerprint_part = &descriptor[start..start + end + 1];
-
-    // Extract just the fingerprint portion between [ and first /
-    let slash_pos = fingerprint_part.find('/')?;
-    let fingerprint = &fingerprint_part[1..slash_pos];
-
-    // Validate it's 8 hex chars
-    if fingerprint.len() == 8 && fingerprint.chars().all(|c| c.is_ascii_hexdigit()) {
-        Some(fingerprint.to_string())
-    } else {
-        None
-    }
-}
-
-fn get_descriptor_pubkeys(
-    desc: &miniscript::Descriptor<miniscript::descriptor::DescriptorPublicKey>,
-    derivation_index: u32,
-    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
-) -> Vec<secp256k1::PublicKey> {
-    let derived_desc = desc
-        .at_derivation_index(derivation_index.into())
-        .expect("Failed to derive descriptor")
-        .derived_descriptor(secp)
-        .expect("Failed to get derived descriptor");
-
-    let mut pubkeys = Vec::new();
-
-    match derived_desc {
-        miniscript::Descriptor::Wsh(wsh) => {
-            match wsh.into_inner() {
-                miniscript::descriptor::WshInner::SortedMulti(multi) => {
-                    // For sorted multi, we can directly get the keys
-                    pubkeys.extend(multi.pks().iter().map(|pk| pk.to_public_key()));
-                }
-                miniscript::descriptor::WshInner::Ms(ms) => {
-                    // Extract keys from the Miniscript
-                    ms.iter_pk().for_each(|pk| {
-                        pubkeys.push(pk.to_public_key());
-                    });
-                }
-            }
-        }
-        // Add other cases as needed
-        _ => panic!("Unsupported descriptor type"),
-    }
-
-    pubkeys.iter().map(|pk| pk.inner).collect()
 }
 
 fn finalize_psbt(mut psbt: Psbt) -> Psbt {
@@ -589,13 +533,21 @@ fn finalize_psbt(mut psbt: Psbt) -> Psbt {
             .collect::<Vec<_>>();
         // Need to get the index of the pk of the main spending path which s derived at m/48'/1'/0'/2'/1/X
         // The recovery key is derived at m/48'/1'/0'/2'/3/X
+        let main_spending_path = bip32
+            .iter()
+            .position(|bip32| {
+                let bip32_vec = bip32.to_u32_vec();
+                let path = bip32_vec.get(4).expect("should be valid path");
+                path == &0 || path == &1
+            })
+            .unwrap();
 
         let sigs = input
             .partial_sigs
             .values()
             .map(|sig| sig)
             .collect::<Vec<_>>();
-        let sig_pk = sigs.get(0).unwrap();
+        let sig_pk = sigs.get(main_spending_path).unwrap();
 
         let witness_script = input
             .witness_script
@@ -605,6 +557,8 @@ fn finalize_psbt(mut psbt: Psbt) -> Psbt {
 
         let mut witness: Witness = Witness::new();
         witness.push_ecdsa_signature(sig_pk);
+        // let input_xpub = input.bip32_derivation.keys().next().unwrap();
+        // witness.push(sig_pk.0.inner.serialize());
         witness.push(witness_script);
 
         input.final_script_witness = Some(witness);
@@ -619,6 +573,7 @@ fn process_pj_receive(
     desc: &descriptors::SinglePathLianaDesc,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
     bitcoind: &mut impl BitcoinInterface,
+    spend_psbt: &Psbt,
 ) -> PayjoinProposal {
     let network = db_conn.network();
     // HACK: Each one of these checks is neccecary way to ensure you are doing payjoin securely, for the prupose of this hackathon project, we are not going to do them
@@ -641,66 +596,18 @@ fn process_pj_receive(
     let wallets = HotSigner::from_datadir(path, network).expect("Failed to load wallet");
     assert!(wallets.len() <= 1, "No wallets found");
     let wallet = &wallets[0];
-    // let drain_script = desc.derive(wallet.change_index, secp).address(network);
-    // let proposal = proposal.replace_receiver_outputs(vec![], &drain_script.script_pubkey()).expect("Failed to replace receiver outputs");
-    // let psbt = proposal.psbt();
-    // let address = db_conn.
+
     let proposal = proposal.commit_outputs();
-    let coins = db_conn.coins(&[CoinStatus::Confirmed], &[]);
+
+    // HACK: this is a hack to get the inputs from the spend psbt
+    // You can really just get inputs from the db but I wasnt sure how to re-asseble the bip32 paths
     let mut inputs = vec![];
-    for coin in coins.values() {
-        let txin = TxIn {
-            previous_output: coin.outpoint,
-            script_sig: ScriptBuf::new(),
-            sequence: Default::default(),
-            witness: Witness::new(),
-        };
-        let prev_tx = bitcoind
-            .wallet_transaction(&coin.outpoint.txid)
-            .expect("Failed to get previous transaction");
-        let prev_out = prev_tx.0.output[coin.outpoint.vout as usize].clone();
-        let mut psbt_in = Input::default();
-        psbt_in.witness_utxo = Some(prev_out.clone());
-        psbt_in.non_witness_utxo = Some(prev_tx.0);
-
-        let address = desc
-            .as_descriptor_public_key()
-            .derived_descriptor(secp, coin.derivation_index.into())
-            .expect("Failed to derive descriptor")
-            .address(network)
-            .unwrap()
-            .script_pubkey();
-
-        let spk = prev_out.script_pubkey;
-        psbt_in.witness_script = Some(spk.clone());
-
-        assert!(spk == address, "SPK and address mismatch");
-        // let change_path = if coin.is_change { 1 } else { 0 };
-        let change_path = 1;
-        let last_used_index = coin.derivation_index;
-        // let spk = desc.derive(last_used_index, secp).script_pubkey();
-
-        // m/48'/1'/0'/2'/1/X
-        let finger_print = extract_fingerprint(&desc.to_string()).unwrap();
-        let finger_print = Fingerprint::from_str(&finger_print).unwrap();
-
-        let derivation_path = DerivationPath::from_str(
-            format!("m/48'/1'/0'/2'/{}/{}", change_path, last_used_index).as_str(),
-        )
-        .unwrap();
-        info!("derivation_path: {:?}", derivation_path);
-
-        let pubkeys = get_descriptor_pubkeys(
-            &desc.as_descriptor_public_key(),
-            last_used_index.into(),
-            secp,
-        );
-        info!("pubkeys: {:?}", pubkeys);
-
-        psbt_in
-            .bip32_derivation
-            .insert(pubkeys[0], (finger_print, derivation_path));
-        inputs.push(InputPair::new(txin, psbt_in).unwrap());
+    for (psbt_in, txin) in spend_psbt
+        .inputs
+        .iter()
+        .zip(spend_psbt.unsigned_tx.input.iter())
+    {
+        inputs.push(InputPair::new(txin.clone(), psbt_in.clone()).unwrap());
     }
 
     let proposal = proposal.contribute_inputs(inputs).unwrap().commit_inputs();
@@ -733,7 +640,7 @@ pub fn payjoin_receiver_check(
     bitcoind: &mut impl BitcoinInterface,
 ) {
     let mut payjoin_receivers = db_conn.get_all_payjoin_receivers();
-    for receiver in payjoin_receivers.iter_mut() {
+    for (receiver, spend_psbt) in payjoin_receivers.iter_mut() {
         info!("Payjoin receiver: {}", receiver.pj_uri());
         let (req, ctx) = receiver
             .extract_req(Url::from_str(OHTTP_RELAY).expect("Invalid OHTTP relay"))
@@ -744,7 +651,8 @@ pub fn payjoin_receiver_check(
             .expect("Failed to process response");
         if let Some(proposal) = proposal {
             info!("Payjoin receiver proposal: {:?}", proposal);
-            let mut proposal = process_pj_receive(&proposal, db_conn, desc, secp, bitcoind);
+            let mut proposal =
+                process_pj_receive(&proposal, db_conn, desc, secp, bitcoind, spend_psbt);
             let (req, ctx) = proposal
                 .extract_req(Url::from_str(OHTTP_RELAY).expect("Invalid OHTTP relay"))
                 .expect("Failed to extract request");
@@ -754,6 +662,8 @@ pub fn payjoin_receiver_check(
             let proposal = receiver
                 .process_res(resp.bytes().expect("Failed to read response").as_ref(), ctx)
                 .expect("Failed to process response");
+            // Update status of receiver
+            db_conn.update_payjoin_receiver_status(receiver.clone(), PayjoinReceiverStatus::Completed);
 
             if let Some(proposal) = proposal {
                 info!("Payjoin receiver proposal: {:?}", proposal);

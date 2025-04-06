@@ -207,7 +207,7 @@ impl DummyDatabase {
 
 impl DatabaseConnection for DummyDatabase {
 
-    fn create_payjoin_receiver(&mut self, receiver: Receiver) {
+    fn create_payjoin_receiver(&mut self, receiver: Receiver, psbt: Psbt) {
         let bip21 = receiver.pj_uri().to_string();
         self.db
             .write()
@@ -225,7 +225,7 @@ impl DatabaseConnection for DummyDatabase {
             .insert(bip21, status);
     }
 
-    fn get_all_payjoin_receivers(&mut self) -> Vec<Receiver> {
+    fn get_all_payjoin_receivers(&mut self) -> Vec<(Receiver, Psbt)> {
         todo!()
         // self.db.read().unwrap().payjoin_receivers.clone().into_iter().collect()
     }

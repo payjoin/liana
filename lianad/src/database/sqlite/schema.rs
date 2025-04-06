@@ -135,7 +135,8 @@ CREATE TABLE payjoin_senders (
 CREATE TABLE payjoin_receivers (
     id INTEGER PRIMARY KEY NOT NULL,
     receiver TEXT NOT NULL,
-    status INTEGER NOT NULL CHECK (status IN (0,1,2))
+    status INTEGER NOT NULL CHECK (status IN (0,1,2)),
+    psbt TEXT NOT NULL
 );
 ";
 

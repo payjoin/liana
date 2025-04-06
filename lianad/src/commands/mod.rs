@@ -23,7 +23,7 @@ use liana::{
 };
 
 use log::info;
-use payjoin::bitcoin::Witness;
+use payjoin::bitcoin::{Address, Witness};
 use payjoin::{persist::NoopPersister, OhttpKeys, Url};
 
 use utils::{
@@ -32,11 +32,7 @@ use utils::{
 };
 
 use std::{
-    collections::{hash_map, HashMap, HashSet},
-    convert::TryInto,
-    fmt,
-    sync::{self, mpsc},
-    time::SystemTime,
+    collections::{hash_map, HashMap, HashSet}, convert::TryInto, fmt, str::FromStr, sync::{self, mpsc}, time::SystemTime
 };
 
 use miniscript::{
@@ -396,10 +392,27 @@ impl DaemonControl {
         let receiver =
             payjoin::receive::v2::Receiver::load(storage_token, &mut NoopPersister)
                 .unwrap();
-        db_conn.create_payjoin_receiver(receiver.clone());
+            
+            let mut payjoin_uri = receiver.pj_uri();
+            // HACK: hardcoded amount for now
+            payjoin_uri.amount = Some(bitcoin::Amount::from_sat(10_000));
+            
+            // HACK: Along with this bip21 lets create a psbt for a spend transaction so we can use that later when signing the payjoin
+            // just generate a random change address for now
+            let some_destiantion = Address::from_str("bcrt1q26y63kz80pm0lzclpej0nerl6a7qetmgx4qqev").unwrap();
+            let spend = self.create_spend(&HashMap::from([(some_destiantion, 10_000)]), &[], 5, None).unwrap();
+            let psbt = match spend {
+                CreateSpendResult::Success { psbt, warnings: _ } => {
+                    // We just care about the inputs of this psbt as it includes bip32 derivation paths
+                psbt
+            }
+            _ => {
+                panic!("Expected a PSBT");
+            }
+        };
 
-        let mut payjoin_uri = receiver.pj_uri();
-        payjoin_uri.amount = Some(bitcoin::Amount::from_sat(10_000));
+        info!("PSBT: {}", psbt.to_string());
+        db_conn.create_payjoin_receiver(receiver.clone(), psbt);
         GetAddressResult::new(address, new_index, payjoin_uri.to_string())
     }
 

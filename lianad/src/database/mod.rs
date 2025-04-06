@@ -210,13 +210,14 @@ pub trait DatabaseConnection {
     fn update_spend_tx(&mut self, spend_tx_id: bitcoin::Txid, psbt: &Psbt);
 
     /// Create a payjoin receiver
-    fn create_payjoin_receiver(&mut self, receiver: Receiver);
+    fn create_payjoin_receiver(&mut self, receiver: Receiver, psbt: Psbt);
 
     /// Update the status of a payjoin receiver
     fn update_payjoin_receiver_status(&mut self, receiver: Receiver, status: PayjoinReceiverStatus);
 
     /// Get a all active payjoin receivers
-    fn get_all_payjoin_receivers(&mut self) -> Vec<Receiver>;
+    /// HACk: dont need to return the psbt, just the receiver
+    fn get_all_payjoin_receivers(&mut self) -> Vec<(Receiver, Psbt)>;
 
 }
 
@@ -458,15 +459,15 @@ impl DatabaseConnection for SqliteConn {
         self.update_spend_tx(spend_tx_id, psbt)
     }
 
-    fn create_payjoin_receiver(&mut self, receiver: Receiver) {
-        self.create_payjoin_receiver(receiver)
+    fn create_payjoin_receiver(&mut self, receiver: Receiver, psbt: Psbt) {
+        self.create_payjoin_receiver(receiver, psbt)
     }
 
     fn update_payjoin_receiver_status(&mut self, receiver: Receiver, status: PayjoinReceiverStatus) {
         self.update_payjoin_receiver_status(receiver, status)
     }
 
-    fn get_all_payjoin_receivers(&mut self) -> Vec<Receiver> {
+    fn get_all_payjoin_receivers(&mut self) -> Vec<(Receiver, Psbt)> {
         self.get_all_payjoin_receivers()
     }   
 }
