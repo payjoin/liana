@@ -25,9 +25,8 @@ pub enum Message {
     ShowQrCode(usize),
     ImportExport(ImportExportMessage),
     HideRescanWarning,
-    PayjoinInitiate(String),
+    PayjoinInitiate,
     PayjoinInitiated(String),
-    ReceivePayjoin(String),
 }
 
 impl Close for Message {

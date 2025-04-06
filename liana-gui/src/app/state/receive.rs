@@ -9,7 +9,7 @@ use liana::miniscript::bitcoin::{
 };
 use liana_ui::{component::modal, widget::*};
 use payjoin::io::fetch_ohttp_keys;
-use payjoin::Url;
+use payjoin::{OhttpKeys, Url};
 
 use crate::daemon::model::LabelsLoader;
 use crate::{
@@ -56,6 +56,12 @@ impl Labelled for Addresses {
     }
 }
 
+#[derive(Clone, Debug)]
+struct PayjoinSpecs {
+    directory: Url,
+    ohttp_keys: OhttpKeys,
+}
+
 pub struct ReceivePanel {
     data_dir: PathBuf,
     wallet: Arc<Wallet>,
@@ -63,10 +69,17 @@ pub struct ReceivePanel {
     labels_edited: LabelsEdited,
     modal: Modal,
     warning: Option<Error>,
+    payjoin_specs: PayjoinSpecs,
 }
 
 impl ReceivePanel {
     pub fn new(data_dir: PathBuf, wallet: Arc<Wallet>) -> Self {
+        let ohttp_relay = Url::parse("https://pj.bobspacebkk.com").unwrap();
+        let directory = Url::parse("https://payjo.in").unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ohttp_keys = rt
+            .block_on(async { fetch_ohttp_keys(ohttp_relay.clone(), directory.clone()).await })
+            .unwrap();
         Self {
             data_dir,
             wallet,
@@ -74,6 +87,10 @@ impl ReceivePanel {
             labels_edited: LabelsEdited::default(),
             modal: Modal::None,
             warning: None,
+            payjoin_specs: PayjoinSpecs {
+                directory,
+                ohttp_keys,
+            },
         }
     }
 }
@@ -137,7 +154,9 @@ impl State for ReceivePanel {
                         self.warning = None;
                         self.addresses.list.push(address.clone());
                         self.addresses.derivation_indexes.push(derivation_index);
-                        self.addresses.payjoin_uris.insert(address.to_string(), payjoin_uri);
+                        self.addresses
+                            .payjoin_uris
+                            .insert(address.to_string(), payjoin_uri);
                     }
                     Err(e) => self.warning = Some(e),
                 }
@@ -163,17 +182,10 @@ impl State for ReceivePanel {
             }
             Message::View(view::Message::Next) => {
                 let daemon = daemon.clone();
-
-                let ohttp_relay = Url::parse("https://pj.bobspacebkk.com").unwrap();
-                let directory = Url::parse("https://payjo.in").unwrap();
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                let ohttp_keys = rt
-                    .block_on(async { fetch_ohttp_keys(ohttp_relay.clone(), directory.clone()).await })
-                    .unwrap();
                 Task::perform(
                     async move {
                         daemon
-                            .receive_payjoin(directory, ohttp_keys)
+                            .get_new_address()
                             .await
                             .map(|res| (res.address, res.derivation_index, res.payjoin_uri))
                             .map_err(|e| e.into())
@@ -192,18 +204,18 @@ impl State for ReceivePanel {
                 }
                 Task::none()
             }
-            Message::View(view::Message::PayjoinInitiate(payjoin_uri)) => {
-                println!("PayjoinInitiate (payjoin_uri): {}", payjoin_uri);
+            Message::View(view::Message::PayjoinInitiate) => {
                 let daemon = daemon.clone();
+                let payjoin_specs = self.payjoin_specs.clone();
                 Task::perform(
                     async move {
                         daemon
-                            .get_new_address()
+                            .receive_payjoin(payjoin_specs.directory, payjoin_specs.ohttp_keys)
                             .await
-                            .map(|res| res.payjoin_uri)
+                            .map(|res| (res.address, res.derivation_index, res.payjoin_uri))
                             .map_err(|e| e.into())
                     },
-                    Message::PayjoinInitiated,
+                    Message::ReceiveAddress,
                 )
             }
             Message::PayjoinInitiated(res) => {
