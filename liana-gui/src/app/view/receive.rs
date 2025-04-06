@@ -45,6 +45,11 @@ pub fn receive<'a>(
                 .align_y(Alignment::Center)
                 .push(Container::new(h3("Receive")).width(Length::Fill))
                 .push(
+                    button::secondary(Some(icon::plus_icon()), "Payjoin")
+                        .on_press(Message::PayjoinInitiate),
+                )
+                .spacing(10)
+                .push(
                     button::secondary(Some(icon::plus_icon()), "Generate address")
                         .on_press(Message::Next),
                 ),
@@ -111,7 +116,7 @@ pub fn receive<'a>(
                                             )
                                             .align_y(Alignment::Center),
                                     )
-                                    .push(
+                                    .push(if !payjoin_uri.is_empty() {
                                         Row::new()
                                             .push(
                                                 Container::new(
@@ -146,8 +151,10 @@ pub fn receive<'a>(
                                                 .on_press(Message::Clipboard(payjoin_uri.clone()))
                                                 .style(theme::button::transparent_border),
                                             )
-                                            .align_y(Alignment::Center),
-                                    )
+                                            .align_y(Alignment::Center)
+                                    } else {
+                                        Row::new()
+                                    })
                                     .push(
                                         Row::new()
                                             .push(
@@ -158,10 +165,6 @@ pub fn receive<'a>(
                                                 .on_press(Message::Select(i)),
                                             )
                                             .push(Space::with_width(Length::Fill))
-                                            .push(
-                                                button::secondary(None, "Payjoin")
-                                                    .on_press(Message::ReceivePayjoin(payjoin_uri.clone())),
-                                            )
                                             .spacing(10)
                                             .push(
                                                 button::secondary(None, "Show QR Code")
