@@ -316,6 +316,10 @@ pub fn spend_header<'a>(
         .into()
 }
 
+pub fn payjoin_send_success_view<'a>() -> Element<'a, Message> {
+    card::simple(text("Payjoin sent successfully")).into()
+}
+
 pub fn spend_overview_view<'a>(
     tx: &'a SpendTx,
     desc_info: &'a LianaPolicy,
@@ -394,6 +398,15 @@ pub fn spend_overview_view<'a>(
                                 .width(Length::Fixed(150.0)),
                         )
                     })
+                    .push_maybe(if tx.path_ready().is_some() {
+                        Some(
+                            button::secondary(None, "Send Payjoin")
+                                .on_press(Message::Spend(SpendTxMessage::SendPayjoin))
+                                .width(Length::Fixed(150.0)),
+                        )
+                    } else {
+                        None
+                    })
                     .align_y(Alignment::Center)
                     .spacing(20),
             )
@@ -409,7 +422,21 @@ pub fn signatures<'a>(
     keys_aliases: &'a HashMap<Fingerprint, String>,
 ) -> Element<'a, Message> {
     Column::new()
-        .push(if let Some(sigs) = tx.path_ready() {
+        .push(if tx.status == SpendStatus::PayjoinInitiated {
+            Container::new(scrollable(
+                Row::new()
+                    .spacing(5)
+                    .align_y(Alignment::Center)
+                    .spacing(10)
+                    .push(p1_bold("Status"))
+                    .push(icon::circle_check_icon().style(theme::text::warning))
+                    .push(
+                        text("      Payjoin initiated")
+                            .bold()
+                            .style(theme::text::warning),
+                    ),
+            ))
+        } else if let Some(sigs) = tx.path_ready() {
             Container::new(
                 scrollable(
                     Row::new()

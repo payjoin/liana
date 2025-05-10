@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    convert::TryInto,
+    convert::{TryFrom, TryInto},
     iter::FromIterator,
     str::FromStr,
     sync::Arc,
@@ -21,6 +21,7 @@ use liana::{
 use lianad::commands::ListCoinsEntry;
 
 use liana_ui::{component::form, widget::Element};
+use payjoin::Uri;
 
 use crate::{
     app::{cache::Cache, error::Error, message::Message, state::psbt, view, wallet::Wallet},
@@ -602,6 +603,20 @@ impl Step for DefineSpend {
                             .update(cache.network, msg);
                     }
 
+                    view::CreateSpendMessage::Bip21Edited(i, bip21) => {
+                        self.recipients.get_mut(i).unwrap().bip21.value = bip21.clone();
+                        if let Ok(uri) = Uri::try_from(bip21.as_str()) {
+                            if let Ok(address) = uri.address.require_network(cache.network) {
+                                self.recipients.get_mut(i).unwrap().address.value =
+                                    address.to_string();
+                            }
+                            if let Some(amount) = uri.amount {
+                                self.recipients.get_mut(i).unwrap().amount.value =
+                                    amount.to_string_in(Denomination::Bitcoin);
+                            }
+                        }
+                    }
+
                     view::CreateSpendMessage::FeerateEdited(s) => {
                         if let Ok(value) = s.parse::<u64>() {
                             self.feerate.value = s;
@@ -832,6 +847,7 @@ struct Recipient {
     label: form::Value<String>,
     address: form::Value<String>,
     amount: form::Value<String>,
+    bip21: form::Value<String>,
     is_recovery: bool,
 }
 
@@ -910,6 +926,10 @@ impl Recipient {
                 self.label.valid = label.len() <= 100;
                 self.label.value = label;
             }
+            view::CreateSpendMessage::Bip21Edited(_, bip21) => {
+                log::info!("bip21: {}", bip21);
+                self.bip21.value = bip21;
+            }
             _ => {}
         };
     }
@@ -922,6 +942,7 @@ impl Recipient {
             &self.label,
             is_max_selected,
             self.is_recovery,
+            &self.bip21,
         )
     }
 }
@@ -945,6 +966,7 @@ impl SaveSpend {
 impl Step for SaveSpend {
     fn load(&mut self, _coins: &[Coin], _tip_height: i32, draft: &TransactionDraft) {
         let (psbt, warnings) = draft.generated.clone().unwrap();
+        let bip21 = draft.recipients.get(0).unwrap().bip21.value.clone();
         let mut tx = SpendTx::new(
             None,
             psbt,
@@ -952,6 +974,7 @@ impl Step for SaveSpend {
             &self.wallet.main_descriptor,
             &self.curve,
             draft.network,
+            Some(bip21),
         );
         tx.labels.clone_from(&draft.labels);
 

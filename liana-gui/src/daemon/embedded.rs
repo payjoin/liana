@@ -1,5 +1,6 @@
 use lianad::bip329::Labels;
 use lianad::commands::UpdateDerivIndexesResult;
+use payjoin::{OhttpKeys, Url};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::Mutex;
 
@@ -101,6 +102,24 @@ impl Daemon for EmbeddedDaemon {
 
     async fn get_new_address(&self) -> Result<GetAddressResult, DaemonError> {
         self.command(|daemon| Ok(daemon.get_new_address())).await
+    }
+
+    async fn receive_payjoin(
+        &self,
+        directory: Url,
+        ohttp_keys: OhttpKeys,
+    ) -> Result<GetAddressResult, DaemonError> {
+        self.command(|daemon| Ok(daemon.receive_payjoin(directory, ohttp_keys)))
+            .await
+    }
+
+    async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError> {
+        self.command(|daemon| {
+            daemon
+                .init_payjoin_sender(bip21, psbt)
+                .map_err(|e| DaemonError::Unexpected(e.to_string()))
+        })
+        .await
     }
 
     async fn update_deriv_indexes(

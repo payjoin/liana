@@ -7,6 +7,8 @@ use liana::miniscript::bitcoin::{
     Address, Network,
 };
 use liana_ui::{component::modal, widget::*};
+use payjoin::io::fetch_ohttp_keys;
+use payjoin::{OhttpKeys, Url};
 
 use crate::daemon::model::LabelsLoader;
 use crate::dir::LianaDirectory;
@@ -37,6 +39,7 @@ pub enum Modal {
 #[derive(Debug, Default)]
 pub struct Addresses {
     list: Vec<Address>,
+    payjoin_uris: HashMap<String, String>,
     derivation_indexes: Vec<ChildNumber>,
     labels: HashMap<String, String>,
 }
@@ -53,6 +56,12 @@ impl Labelled for Addresses {
     }
 }
 
+#[derive(Clone, Debug)]
+struct PayjoinSpecs {
+    directory: Url,
+    ohttp_keys: OhttpKeys,
+}
+
 pub struct ReceivePanel {
     data_dir: LianaDirectory,
     wallet: Arc<Wallet>,
@@ -60,10 +69,17 @@ pub struct ReceivePanel {
     labels_edited: LabelsEdited,
     modal: Modal,
     warning: Option<Error>,
+    payjoin_specs: PayjoinSpecs,
 }
 
 impl ReceivePanel {
     pub fn new(data_dir: LianaDirectory, wallet: Arc<Wallet>) -> Self {
+        let ohttp_relay = Url::parse("https://pj.bobspacebkk.com").unwrap();
+        let directory = Url::parse("https://payjo.in").unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ohttp_keys = rt
+            .block_on(async { fetch_ohttp_keys(ohttp_relay.clone(), directory.clone()).await })
+            .unwrap();
         Self {
             data_dir,
             wallet,
@@ -71,6 +87,10 @@ impl ReceivePanel {
             labels_edited: LabelsEdited::default(),
             modal: Modal::None,
             warning: None,
+            payjoin_specs: PayjoinSpecs {
+                directory,
+                ohttp_keys,
+            },
         }
     }
 }
@@ -83,6 +103,7 @@ impl State for ReceivePanel {
             self.warning.as_ref(),
             view::receive::receive(
                 &self.addresses.list,
+                &self.addresses.payjoin_uris,
                 &self.addresses.labels,
                 self.labels_edited.cache(),
             ),
@@ -129,10 +150,13 @@ impl State for ReceivePanel {
             }
             Message::ReceiveAddress(res) => {
                 match res {
-                    Ok((address, derivation_index)) => {
+                    Ok((address, derivation_index, payjoin_uri)) => {
                         self.warning = None;
-                        self.addresses.list.push(address);
+                        self.addresses.list.push(address.clone());
                         self.addresses.derivation_indexes.push(derivation_index);
+                        self.addresses
+                            .payjoin_uris
+                            .insert(address.to_string(), payjoin_uri);
                     }
                     Err(e) => self.warning = Some(e),
                 }
@@ -163,7 +187,7 @@ impl State for ReceivePanel {
                         daemon
                             .get_new_address()
                             .await
-                            .map(|res| (res.address, res.derivation_index))
+                            .map(|res| (res.address, res.derivation_index, res.payjoin_uri))
                             .map_err(|e| e.into())
                     },
                     Message::ReceiveAddress,
@@ -179,6 +203,20 @@ impl State for ReceivePanel {
                     }
                 }
                 Task::none()
+            }
+            Message::View(view::Message::PayjoinInitiate) => {
+                let daemon = daemon.clone();
+                let payjoin_specs = self.payjoin_specs.clone();
+                Task::perform(
+                    async move {
+                        daemon
+                            .receive_payjoin(payjoin_specs.directory, payjoin_specs.ohttp_keys)
+                            .await
+                            .map(|res| (res.address, res.derivation_index, res.payjoin_uri))
+                            .map_err(|e| e.into())
+                    },
+                    Message::ReceiveAddress,
+                )
             }
             _ => {
                 if let Modal::VerifyAddress(ref mut m) = self.modal {
@@ -352,7 +390,8 @@ mod tests {
             Some(json!({"method": "getnewaddress", "params": Option::<Request>::None})),
             Ok(json!(GetAddressResult::new(
                 addr.clone(),
-                ChildNumber::from_normal_idx(0).unwrap()
+                ChildNumber::from_normal_idx(0).unwrap(),
+                "".to_string(),
             ))),
         )]);
         let wallet = Arc::new(Wallet::new(LianaDescriptor::from_str(DESC).unwrap()));

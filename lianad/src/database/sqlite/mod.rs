@@ -27,12 +27,14 @@ use crate::{
     },
 };
 use liana::descriptors::LianaDescriptor;
+use payjoin::receive::v2::Receiver;
 
 use std::{
     cmp,
     collections::{HashMap, HashSet},
     convert::TryInto,
     fmt, io, path,
+    str::FromStr,
 };
 
 use miniscript::bitcoin::{
@@ -210,6 +212,48 @@ impl SqliteDb {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PayjoinSenderStatus {
+    Pending = 0,
+    Signing = 1,
+    Completed = 2,
+    // TODO: more specific enums for why it failed
+    Failed = 3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PayjoinReceiverStatus {
+    Pending = 0,
+    Signing = 1,
+    Completed = 2,
+    // TODO: more specific enums for why it failed
+    Failed = 3,
+}
+
+impl From<i32> for PayjoinSenderStatus {
+    fn from(status: i32) -> Self {
+        match status {
+            0 => PayjoinSenderStatus::Pending,
+            1 => PayjoinSenderStatus::Signing,
+            2 => PayjoinSenderStatus::Completed,
+            3 => PayjoinSenderStatus::Failed,
+            _ => panic!("Invalid payjoin sender status: {}", status),
+        }
+    }
+}
+
+impl From<i32> for PayjoinReceiverStatus {
+    fn from(status: i32) -> Self {
+        match status {
+            0 => PayjoinReceiverStatus::Pending,
+            1 => PayjoinReceiverStatus::Signing,
+            2 => PayjoinReceiverStatus::Completed,
+            3 => PayjoinReceiverStatus::Failed,
+            _ => panic!("Invalid payjoin receiver status: {}", status),
+        }
     }
 }
 
@@ -958,6 +1002,113 @@ impl SqliteConn {
             db_tx.execute(
                 "UPDATE tip SET blockheight = (?1), blockhash = (?2)",
                 rusqlite::params![new_tip.height, new_tip.hash[..].to_vec()],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    /// Create a payjoin receiver, TODO: strong type to bitcoin::Address?
+    pub fn create_payjoin_receiver(
+        &mut self,
+        address: &bitcoin::Address,
+        receiver: Receiver,
+        psbt_str: String,
+    ) {
+        let receiver_json = serde_json::to_string(&receiver).unwrap();
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "INSERT INTO payjoin_receivers (address, status, receiver, psbt) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![
+                    address.to_string(),
+                    PayjoinReceiverStatus::Pending as i32,
+                    receiver_json,
+                    psbt_str
+                ],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    pub fn update_payjoin_receiver_status(
+        &mut self,
+        address: &bitcoin::Address,
+        status: PayjoinReceiverStatus,
+        psbt_str: String,
+    ) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "UPDATE payjoin_receivers SET status = ?1, psbt = ?2 WHERE address = ?3",
+                rusqlite::params![status as i32, psbt_str, address.to_string()],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    pub fn get_all_payjoin_receivers(
+        &mut self,
+    ) -> Vec<(bitcoin::Address, PayjoinReceiverStatus, Receiver, String)> {
+        db_query(
+            &mut self.conn,
+            "SELECT address, status, receiver, psbt FROM payjoin_receivers",
+            rusqlite::params![],
+            |row| {
+                let address_str: String = row.get(0)?;
+                let address = bitcoin::Address::from_str(&address_str)
+                    .unwrap()
+                    .assume_checked();
+                let status: i32 = row.get(1)?;
+                let receiver_json: String = row.get(2)?;
+                let receiver: Receiver = serde_json::from_str(&receiver_json).unwrap();
+                let psbt_str: String = row.get(3)?;
+                Ok((address, status.into(), receiver, psbt_str))
+            },
+        )
+        .expect("Db must not fail")
+    }
+
+    /// Create a payjoin sender
+    pub fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
+        let status = PayjoinSenderStatus::Pending;
+        let txid = spend_tx_id[..].to_vec();
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "INSERT INTO payjoin_senders (bip21, spend_tx_id, status) VALUES (?1, ?2, ?3)",
+                rusqlite::params![bip21, txid, status as i32],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    pub fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus)> {
+        db_query(
+            &mut self.conn,
+            "SELECT bip21, spend_tx_id, status FROM payjoin_senders WHERE status = ?1",
+            rusqlite::params![PayjoinSenderStatus::Pending as i32],
+            |row| {
+                let bip21: String = row.get(0)?;
+                let spend_tx_id: Vec<u8> = row.get(1)?;
+                let txid: bitcoin::Txid =
+                    encode::deserialize(&spend_tx_id).expect("We only store valid txids");
+                let status: i32 = row.get(2)?;
+                Ok((bip21, txid, PayjoinSenderStatus::from(status)))
+            },
+        )
+        .expect("Db must not fail")
+    }
+
+    pub fn update_payjoin_sender_status(
+        &mut self,
+        spend_tx_id: bitcoin::Txid,
+        status: PayjoinSenderStatus,
+    ) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "UPDATE payjoin_senders SET status = ?1 WHERE spend_tx_id = ?2",
+                rusqlite::params![status as i32, spend_tx_id[..].to_vec()],
             )?;
             Ok(())
         })

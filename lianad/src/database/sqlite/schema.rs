@@ -122,6 +122,23 @@ CREATE TABLE labels (
     item TEXT UNIQUE NOT NULL,
     value TEXT NOT NULL
 );
+
+/* Payjoin senders */
+CREATE TABLE payjoin_senders (
+    id INTEGER PRIMARY KEY NOT NULL,
+    bip21 TEXT NOT NULL,
+    spend_tx_id BLOB UNIQUE NOT NULL,
+    status INTEGER NOT NULL CHECK (status IN (0,1,2,3,4))
+);
+
+/* Payjoin receivers */
+CREATE TABLE payjoin_receivers (
+    id INTEGER PRIMARY KEY NOT NULL,
+    address TEXT UNIQUE NOT NULL,
+    status INTEGER NOT NULL CHECK (status IN (0,1,2,3,4)),
+    receiver TEXT NOT NULL,
+    psbt TEXT NOT NULL
+);
 ";
 
 /// A row in the "tip" table.

@@ -2,12 +2,14 @@ use crate::{
     bitcoin::{BitcoinInterface, Block, BlockChainTip, MempoolEntry, SyncProgress, UTxO},
     config::{BitcoinConfig, Config},
     database::{
-        BlockInfo, Coin, CoinStatus, DatabaseConnection, DatabaseInterface, LabelItem, Wallet,
+        sqlite::PayjoinReceiverStatus, BlockInfo, Coin, CoinStatus, DatabaseConnection,
+        DatabaseInterface, LabelItem, Wallet,
     },
     datadir::DataDirectory,
     DaemonControl, DaemonHandle,
 };
 use liana::descriptors;
+use payjoin::receive::v2::Receiver;
 
 use std::convert::TryInto;
 use std::{
@@ -526,6 +528,52 @@ impl DatabaseConnection for DummyDatabase {
     }
 
     fn get_labels_bip329(&mut self, _offset: u32, _limit: u32) -> bip329::Labels {
+        todo!()
+    }
+
+    fn create_payjoin_receiver(
+        &mut self,
+        _address: &bitcoin::Address,
+        _receiver: Receiver,
+        _psbt: String,
+    ) {
+        todo!()
+    }
+
+    fn get_all_payjoin_receivers(
+        &mut self,
+    ) -> Vec<(bitcoin::Address, PayjoinReceiverStatus, Receiver, String)> {
+        todo!()
+    }
+
+    fn update_payjoin_receiver_status(
+        &mut self,
+        _address: &bitcoin::Address,
+        _status: PayjoinReceiverStatus,
+        _psbt_str: String,
+    ) {
+        todo!()
+    }
+
+    fn create_payjoin_sender(&mut self, _bip21: String, _spend_tx_id: bitcoin::Txid) {
+        todo!()
+    }
+
+    fn get_all_payjoin_senders(
+        &mut self,
+    ) -> Vec<(
+        String,
+        bitcoin::Txid,
+        crate::database::sqlite::PayjoinSenderStatus,
+    )> {
+        todo!()
+    }
+
+    fn update_payjoin_sender_status(
+        &mut self,
+        _spend_tx_id: bitcoin::Txid,
+        _status: crate::database::sqlite::PayjoinSenderStatus,
+    ) {
         todo!()
     }
 }

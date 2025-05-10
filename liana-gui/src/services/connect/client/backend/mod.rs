@@ -16,6 +16,7 @@ use lianad::{
     commands::{CoinStatus, GetInfoDescriptors, LCSpendInfo, LabelItem, UpdateDerivIndexesResult},
     config::Config,
 };
+use payjoin::{OhttpKeys, Url};
 use reqwest::{Error, IntoUrl, Method, RequestBuilder, Response};
 use tokio::sync::RwLock;
 
@@ -607,7 +608,20 @@ impl Daemon for BackendWalletClient {
         Ok(GetAddressResult {
             address: res.address,
             derivation_index: res.derivation_index,
+            payjoin_uri: "bitcoin:".to_string(),
         })
+    }
+
+    async fn receive_payjoin(
+        &self,
+        _directory: Url,
+        _ohttp_keys: OhttpKeys,
+    ) -> Result<GetAddressResult, DaemonError> {
+        unimplemented!()
+    }
+
+    async fn send_payjoin(&self, _bip21: String, _psbt: &Psbt) -> Result<(), DaemonError> {
+        unimplemented!()
     }
 
     async fn update_deriv_indexes(
@@ -1233,6 +1247,8 @@ fn spend_tx_from_api(
         desc,
         secp,
         network,
+        // TODO: BIP21 loaded from the backend will always be ignored
+        None,
     );
     tx.load_labels(&labels);
     tx

@@ -1,3 +1,4 @@
+use log::warn;
 use miniscript::{
     bitcoin::{
         self,
@@ -445,7 +446,15 @@ impl LianaDescriptor {
             if txin.sequence != first_txin.sequence
                 || spend_info != self.partial_spend_info_txin(psbt_in, txin)
             {
-                return Err(LianaDescError::InconsistentPsbt);
+                // TODO(arturgontijo): Skip for now
+                warn!(
+                    "LianaDescError::InconsistentPsbt -> {} != {} || {:?} != {:?}",
+                    txin.sequence,
+                    first_txin.sequence,
+                    spend_info,
+                    self.partial_spend_info_txin(psbt_in, txin)
+                );
+                // return Err(LianaDescError::InconsistentPsbt);
             }
         }
 

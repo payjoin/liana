@@ -35,6 +35,7 @@ use super::message::Message;
 
 pub fn receive<'a>(
     addresses: &'a [bitcoin::Address],
+    payjoin_uris: &'a HashMap<String, String>,
     labels: &'a HashMap<String, String>,
     labels_editing: &'a HashMap<String, form::Value<String>>,
 ) -> Element<'a, Message> {
@@ -43,6 +44,11 @@ pub fn receive<'a>(
             Row::new()
                 .align_y(Alignment::Center)
                 .push(Container::new(h3("Receive")).width(Length::Fill))
+                .push(
+                    button::secondary(Some(icon::plus_icon()), "Payjoin")
+                        .on_press(Message::PayjoinInitiate),
+                )
+                .spacing(10)
                 .push(
                     button::primary(Some(icon::plus_icon()), "Generate address")
                         .on_press(Message::Next),
@@ -56,6 +62,7 @@ pub fn receive<'a>(
                     Column::new().spacing(10).width(Length::Fill),
                     |col, (i, address)| {
                         let addr = address.to_string();
+                        let payjoin_uri = payjoin_uris.get(&addr).unwrap();
                         col.push(
                             card::simple(
                                 Column::new()
@@ -109,6 +116,45 @@ pub fn receive<'a>(
                                             )
                                             .align_y(Alignment::Center),
                                     )
+                                    .push(if !payjoin_uri.is_empty() {
+                                        Row::new()
+                                            .push(
+                                                Container::new(
+                                                    scrollable(
+                                                        Column::new()
+                                                            .push(Space::with_height(
+                                                                Length::Fixed(10.0),
+                                                            ))
+                                                            .push(
+                                                                p2_regular(&payjoin_uri)
+                                                                    .small()
+                                                                    .style(theme::text::secondary),
+                                                            )
+                                                            // Space between the URI and the scrollbar
+                                                            .push(Space::with_height(
+                                                                Length::Fixed(10.0),
+                                                            )),
+                                                    )
+                                                    .direction(scrollable::Direction::Horizontal(
+                                                        scrollable::Scrollbar::new()
+                                                            .width(2)
+                                                            .scroller_width(2),
+                                                    )),
+                                                )
+                                                .width(Length::Fill),
+                                            )
+                                            .push(
+                                                Button::new(
+                                                    icon::clipboard_icon()
+                                                        .style(theme::text::secondary),
+                                                )
+                                                .on_press(Message::Clipboard(payjoin_uri.clone()))
+                                                .style(theme::button::transparent_border),
+                                            )
+                                            .align_y(Alignment::Center)
+                                    } else {
+                                        Row::new()
+                                    })
                                     .push(
                                         Row::new()
                                             .push(

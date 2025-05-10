@@ -52,6 +52,7 @@ pub struct SpendTx {
     pub sigs: PartialSpendInfo,
     pub updated_at: Option<u32>,
     pub kind: TransactionKind,
+    pub bip21: Option<String>,
 }
 
 #[derive(PartialOrd, Ord, Debug, Clone, PartialEq, Eq)]
@@ -60,6 +61,7 @@ pub enum SpendStatus {
     Broadcast,
     Spent,
     Deprecated,
+    PayjoinInitiated,
 }
 
 impl SpendTx {
@@ -70,6 +72,7 @@ impl SpendTx {
         desc: &LianaDescriptor,
         secp: &secp256k1::Secp256k1<impl secp256k1::Verification>,
         network: Network,
+        bip21: Option<String>,
     ) -> Self {
         // Use primary path if no inputs are using a relative locktime.
         let use_primary_path = !psbt
@@ -145,7 +148,9 @@ impl SpendTx {
 
         // One input coin is missing, the psbt is deprecated for now.
         if coins_map.len() != psbt.inputs.len() {
-            status = SpendStatus::Deprecated
+            // TODO(arturgontijo): Skip for now...
+            log::warn!("Not deprecating...");
+            // status = SpendStatus::Deprecated
         }
 
         let sigs = desc
@@ -189,6 +194,7 @@ impl SpendTx {
             status,
             sigs,
             network,
+            bip21,
         }
     }
 

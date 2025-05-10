@@ -5,6 +5,7 @@ use std::iter::FromIterator;
 use async_trait::async_trait;
 use lianad::bip329::Labels;
 use lianad::commands::{GetLabelsBip329Result, UpdateDerivIndexesResult};
+use payjoin::{OhttpKeys, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -85,6 +86,18 @@ impl<C: Client + Send + Sync + Debug> Daemon for Lianad<C> {
 
     async fn get_new_address(&self) -> Result<GetAddressResult, DaemonError> {
         self.call("getnewaddress", Option::<Request>::None)
+    }
+
+    async fn receive_payjoin(
+        &self,
+        _directory: Url,
+        _ohttp_keys: OhttpKeys,
+    ) -> Result<GetAddressResult, DaemonError> {
+        unimplemented!()
+    }
+
+    async fn send_payjoin(&self, _bip21: String, _psbt: &Psbt) -> Result<(), DaemonError> {
+        unimplemented!()
     }
 
     async fn update_deriv_indexes(

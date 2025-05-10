@@ -58,6 +58,7 @@ pub enum PsbtModal {
     Broadcast(BroadcastModal),
     Delete(DeleteModal),
     Export(ExportModal),
+    SendPayjoin(SendPayjoinModal),
 }
 
 impl<'a> AsRef<dyn Modal + 'a> for PsbtModal {
@@ -68,6 +69,7 @@ impl<'a> AsRef<dyn Modal + 'a> for PsbtModal {
             Self::Broadcast(a) => a,
             Self::Delete(a) => a,
             Self::Export(a) => a,
+            Self::SendPayjoin(a) => a,
         }
     }
 }
@@ -80,6 +82,7 @@ impl<'a> AsMut<dyn Modal + 'a> for PsbtModal {
             Self::Broadcast(a) => a,
             Self::Delete(a) => a,
             Self::Export(a) => a,
+            Self::SendPayjoin(a) => a,
         }
     }
 }
@@ -174,6 +177,29 @@ impl PsbtState {
             }
             Message::View(view::Message::Spend(view::SpendTxMessage::Delete)) => {
                 self.modal = Some(PsbtModal::Delete(DeleteModal::default()));
+            }
+            Message::View(view::Message::Spend(view::SpendTxMessage::SendPayjoin)) => {
+                let modal = SendPayjoinModal::new();
+                let cmd = modal.load(daemon);
+                self.modal = Some(PsbtModal::SendPayjoin(modal));
+                return cmd;
+            }
+            Message::View(view::Message::Spend(view::SpendTxMessage::PayjoinInitiated)) => {
+                self.tx.status = SpendStatus::PayjoinInitiated;
+                self.modal = None;
+                if let Some(bip21) = self.tx.bip21.clone() {
+                    // TODO: remove clone
+                    let psbt = self.tx.psbt.clone();
+                    return Task::perform(
+                        async move {
+                            daemon
+                                .send_payjoin(bip21.clone(), &psbt)
+                                .await
+                                .map_err(|e| e.into())
+                        },
+                        Message::SendPayjoin,
+                    );
+                }
             }
             Message::View(view::Message::Spend(view::SpendTxMessage::Sign)) => {
                 if let Some(PsbtModal::Sign(SignModal { display_modal, .. })) = &mut self.modal {
@@ -277,6 +303,28 @@ impl PsbtState {
         } else {
             content
         }
+    }
+}
+
+#[derive(Default)]
+pub struct SendPayjoinModal {
+    _error: Option<Error>,
+}
+
+impl SendPayjoinModal {
+    pub fn new() -> Self {
+        Self { _error: None }
+    }
+}
+
+impl Modal for SendPayjoinModal {
+    fn view<'a>(&'a self, content: Element<'a, view::Message>) -> Element<'a, view::Message> {
+        modal::Modal::new(content, view::psbt::payjoin_send_success_view())
+            // On blur, show the psbts view
+            .on_blur(Some(view::Message::Spend(
+                view::SpendTxMessage::PayjoinInitiated,
+            )))
+            .into()
     }
 }
 

@@ -43,6 +43,7 @@ use miniscript::{
     },
     psbt::PsbtExt,
 };
+use payjoin::{persist::NoopPersister, OhttpKeys, Url};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -359,7 +360,49 @@ impl DaemonControl {
             .receive_descriptor()
             .derive(new_index, &self.secp)
             .address(self.config.bitcoin_config.network);
-        GetAddressResult::new(address, new_index)
+        GetAddressResult::new(address, new_index, "".to_string())
+    }
+
+    pub fn receive_payjoin(&self, directory: Url, ohttp_keys: OhttpKeys) -> GetAddressResult {
+        let mut db_conn = self.db.connection();
+        let index = db_conn.receive_index();
+        let new_index = index
+            .increment()
+            .expect("Can't get into hardened territory");
+        db_conn.set_receive_index(new_index, &self.secp);
+        let address = self
+            .config
+            .main_descriptor
+            .receive_descriptor()
+            .derive(new_index, &self.secp)
+            .address(self.config.bitcoin_config.network);
+
+        let pj_receiver = payjoin::receive::v2::NewReceiver::new(
+            address.clone(),
+            directory.clone(),
+            ohttp_keys.clone(),
+            None,
+        )
+        .unwrap();
+
+        let storage_token = pj_receiver.persist(&mut NoopPersister).unwrap();
+        let receiver =
+            payjoin::receive::v2::Receiver::load(storage_token, &mut NoopPersister).unwrap();
+
+        let mut payjoin_uri = receiver.pj_uri();
+        // HACK: hardcoded amount for now
+        payjoin_uri.amount = Some(bitcoin::Amount::from_sat(10_000));
+
+        db_conn.create_payjoin_receiver(&address, receiver.clone(), "".to_string());
+        GetAddressResult::new(address, new_index, payjoin_uri.to_string())
+    }
+
+    /// Initate a payjoin sender
+    pub fn init_payjoin_sender(&self, bip21: String, psbt: &Psbt) -> Result<(), CommandError> {
+        let mut db_conn = self.db.connection();
+        let txid = psbt.clone().extract_tx().unwrap().compute_txid();
+        db_conn.create_payjoin_sender(bip21, txid);
+        Ok(())
     }
 
     /// Update derivation indexes
@@ -807,14 +850,24 @@ impl DaemonControl {
         let mut spend_psbt = db_conn
             .spend_tx(txid)
             .ok_or(CommandError::UnknownSpend(*txid))?;
-        spend_psbt.finalize_mut(&self.secp).map_err(|e| {
-            CommandError::SpendFinalization(
-                e.into_iter()
-                    .next()
-                    .map(|e| e.to_string())
-                    .unwrap_or_default(),
-            )
-        })?;
+
+        let mut inputs_to_finalize = vec![];
+        for (index, input) in spend_psbt.inputs.iter().enumerate() {
+            if input.final_script_sig.is_some()
+                || input.final_script_witness.is_some()
+                || input.partial_sigs.is_empty()
+            {
+                continue;
+            }
+            inputs_to_finalize.push(index);
+        }
+
+        for index in inputs_to_finalize {
+            log::info!("Finalizing input at: {}", index);
+            spend_psbt
+                .finalize_inp_mut(&self.secp, index)
+                .map_err(|e| CommandError::SpendFinalization(e.to_string()))?;
+        }
 
         // Then, broadcast it (or try to, we never know if we are not going to hit an
         // error at broadcast time).
@@ -1278,13 +1331,19 @@ pub struct GetAddressResult {
     #[serde(deserialize_with = "deser_addr_assume_checked")]
     pub address: bitcoin::Address,
     pub derivation_index: bip32::ChildNumber,
+    pub payjoin_uri: String,
 }
 
 impl GetAddressResult {
-    pub fn new(address: bitcoin::Address, derivation_index: bip32::ChildNumber) -> Self {
+    pub fn new(
+        address: bitcoin::Address,
+        derivation_index: bip32::ChildNumber,
+        payjoin_uri: String,
+    ) -> Self {
         Self {
             address,
             derivation_index,
+            payjoin_uri,
         }
     }
 }
