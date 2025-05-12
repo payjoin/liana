@@ -60,6 +60,5 @@ jsonrpc = { version = "0.17", features = ["minreq_http"], default-features = fal
 bip329 = { version = "0.3.0", default-features = false }
 
 # Payjoin
-payjoin = { git = "https://github.com/0xBEEFCAF3/rust-payjoin.git", rev = "619ea5b7dac311461f5ba0d7e6f8ba2e7030e57d", features = ["v2", "io"]}
-# payjoin = { path = "../../../rust-payjoin/payjoin", features = ["v2", "io"]}
+payjoin = { git = "https://github.com/arturgontijo/rust-payjoin.git", branch = "liana-poc", features = ["v2", "io"]}
 reqwest = { version = "0.11", default-features=false, features = ["json", "rustls-tls", "stream", "blocking"] }

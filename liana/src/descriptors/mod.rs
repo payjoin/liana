@@ -447,13 +447,7 @@ impl LianaDescriptor {
                 || spend_info != self.partial_spend_info_txin(psbt_in, txin)
             {
                 // TODO(arturgontijo): Skip for now
-                warn!(
-                    "LianaDescError::InconsistentPsbt -> {} != {} || {:?} != {:?}",
-                    txin.sequence,
-                    first_txin.sequence,
-                    spend_info,
-                    self.partial_spend_info_txin(psbt_in, txin)
-                );
+                warn!("LianaDescError::InconsistentPsbt: Not throwing...");
                 // return Err(LianaDescError::InconsistentPsbt);
             }
         }

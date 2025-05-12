@@ -851,22 +851,11 @@ impl DaemonControl {
             .spend_tx(txid)
             .ok_or(CommandError::UnknownSpend(*txid))?;
 
-        let mut inputs_to_finalize = vec![];
-        for (index, input) in spend_psbt.inputs.iter().enumerate() {
-            if input.final_script_sig.is_some()
-                || input.final_script_witness.is_some()
-                || input.partial_sigs.is_empty()
-            {
-                continue;
+        for index in 0..spend_psbt.inputs.len() {
+            match spend_psbt.finalize_inp_mut(&self.secp, index) {
+                Ok(_) => log::info!("Finalizing input at: {}", index),
+                Err(_) => log::info!("Failed to finalizing input at: {}", index),
             }
-            inputs_to_finalize.push(index);
-        }
-
-        for index in inputs_to_finalize {
-            log::info!("Finalizing input at: {}", index);
-            spend_psbt
-                .finalize_inp_mut(&self.secp, index)
-                .map_err(|e| CommandError::SpendFinalization(e.to_string()))?;
         }
 
         // Then, broadcast it (or try to, we never know if we are not going to hit an
