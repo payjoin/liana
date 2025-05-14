@@ -27,7 +27,7 @@ use crate::{
     },
 };
 use liana::descriptors::LianaDescriptor;
-use payjoin::receive::v2::Receiver;
+use payjoin::{receive::v2::Receiver, send::v2::Sender};
 
 use std::{
     cmp,
@@ -218,7 +218,7 @@ impl SqliteDb {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PayjoinSenderStatus {
     Pending = 0,
-    Signing = 1,
+    WaitingReceiver = 1,
     Completed = 2,
     // TODO: more specific enums for why it failed
     Failed = 3,
@@ -237,7 +237,7 @@ impl From<i32> for PayjoinSenderStatus {
     fn from(status: i32) -> Self {
         match status {
             0 => PayjoinSenderStatus::Pending,
-            1 => PayjoinSenderStatus::Signing,
+            1 => PayjoinSenderStatus::WaitingReceiver,
             2 => PayjoinSenderStatus::Completed,
             3 => PayjoinSenderStatus::Failed,
             _ => panic!("Invalid payjoin sender status: {}", status),
@@ -1075,26 +1075,34 @@ impl SqliteConn {
         let txid = spend_tx_id[..].to_vec();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_senders (bip21, spend_tx_id, status) VALUES (?1, ?2, ?3)",
-                rusqlite::params![bip21, txid, status as i32],
+                "INSERT INTO payjoin_senders (bip21, spend_tx_id, status, sender) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![bip21, txid, status as i32, String::new()],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
     }
 
-    pub fn get_all_payjoin_senders(&mut self) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus)> {
+    pub fn get_all_payjoin_senders(
+        &mut self,
+    ) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus, Option<Sender>)> {
         db_query(
             &mut self.conn,
-            "SELECT bip21, spend_tx_id, status FROM payjoin_senders WHERE status = ?1",
-            rusqlite::params![PayjoinSenderStatus::Pending as i32],
+            "SELECT bip21, spend_tx_id, status, sender FROM payjoin_senders",
+            rusqlite::params![],
             |row| {
                 let bip21: String = row.get(0)?;
                 let spend_tx_id: Vec<u8> = row.get(1)?;
                 let txid: bitcoin::Txid =
                     encode::deserialize(&spend_tx_id).expect("We only store valid txids");
                 let status: i32 = row.get(2)?;
-                Ok((bip21, txid, PayjoinSenderStatus::from(status)))
+                let sender_json: String = row.get(3)?;
+                let maybe_sender: Option<Sender> = if !sender_json.is_empty() {
+                    Some(serde_json::from_str(&sender_json).unwrap())
+                } else {
+                    None
+                };
+                Ok((bip21, txid, PayjoinSenderStatus::from(status), maybe_sender))
             },
         )
         .expect("Db must not fail")
@@ -1104,15 +1112,28 @@ impl SqliteConn {
         &mut self,
         spend_tx_id: bitcoin::Txid,
         status: PayjoinSenderStatus,
+        maybe_sender: Option<Sender>,
     ) {
-        db_exec(&mut self.conn, |db_tx| {
-            db_tx.execute(
-                "UPDATE payjoin_senders SET status = ?1 WHERE spend_tx_id = ?2",
-                rusqlite::params![status as i32, spend_tx_id[..].to_vec()],
-            )?;
-            Ok(())
-        })
-        .expect("Db must not fail");
+        if let Some(sender) = maybe_sender {
+            let sender_json = serde_json::to_string(&sender).unwrap();
+            db_exec(&mut self.conn, |db_tx| {
+                db_tx.execute(
+                    "UPDATE payjoin_senders SET status = ?1, sender = ?2 WHERE spend_tx_id = ?3",
+                    rusqlite::params![status as i32, sender_json, spend_tx_id[..].to_vec()],
+                )?;
+                Ok(())
+            })
+            .expect("Db must not fail");
+        } else {
+            db_exec(&mut self.conn, |db_tx| {
+                db_tx.execute(
+                    "UPDATE payjoin_senders SET status = ?1 WHERE spend_tx_id = ?2",
+                    rusqlite::params![status as i32, spend_tx_id[..].to_vec()],
+                )?;
+                Ok(())
+            })
+            .expect("Db must not fail");
+        }
     }
 }
 

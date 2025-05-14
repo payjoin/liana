@@ -128,14 +128,15 @@ CREATE TABLE payjoin_senders (
     id INTEGER PRIMARY KEY NOT NULL,
     bip21 TEXT NOT NULL,
     spend_tx_id BLOB UNIQUE NOT NULL,
-    status INTEGER NOT NULL CHECK (status IN (0,1,2,3,4))
+    status INTEGER NOT NULL CHECK (status IN (0,1,2,3)),
+    sender TEXT NOT NULL
 );
 
 /* Payjoin receivers */
 CREATE TABLE payjoin_receivers (
     id INTEGER PRIMARY KEY NOT NULL,
     address TEXT UNIQUE NOT NULL,
-    status INTEGER NOT NULL CHECK (status IN (0,1,2,3,4)),
+    status INTEGER NOT NULL CHECK (status IN (0,1,2,3)),
     receiver TEXT NOT NULL,
     psbt TEXT NOT NULL
 );

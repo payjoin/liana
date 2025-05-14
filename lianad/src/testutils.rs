@@ -9,7 +9,7 @@ use crate::{
     DaemonControl, DaemonHandle,
 };
 use liana::descriptors;
-use payjoin::receive::v2::Receiver;
+use payjoin::{receive::v2::Receiver, send::v2::Sender};
 
 use std::convert::TryInto;
 use std::{
@@ -565,6 +565,7 @@ impl DatabaseConnection for DummyDatabase {
         String,
         bitcoin::Txid,
         crate::database::sqlite::PayjoinSenderStatus,
+        Option<Sender>,
     )> {
         todo!()
     }
@@ -573,6 +574,7 @@ impl DatabaseConnection for DummyDatabase {
         &mut self,
         _spend_tx_id: bitcoin::Txid,
         _status: crate::database::sqlite::PayjoinSenderStatus,
+        _maybe_sender: Option<Sender>,
     ) {
         todo!()
     }

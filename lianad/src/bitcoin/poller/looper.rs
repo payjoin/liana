@@ -462,7 +462,7 @@ fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::VerifyO
     for index in inputs_to_finalize {
         match psbt.finalize_inp_mut(&secp, index) {
             Ok(_) => log::info!("Finalizing input at: {}", index),
-            Err(_) => log::info!("Failed to finalizing input at: {}", index),
+            Err(e) => log::warn!("Failed to finalize input at: {} | {}", index, e),
         }
     }
 
@@ -496,6 +496,12 @@ fn process_proposal_psbt(
 ) -> Result<Psbt, ()> {
     let coins = db_conn.coins(&[CoinStatus::Confirmed], &[]);
     if let Some((_, coin)) = coins.iter().next() {
+        // descs must always have 2 descriptors
+        assert_eq!(descs.len(), 2);
+
+        let receiver_derived_desc = descs[0].derive(coin.derivation_index, secp);
+        let script_pubkey = receiver_derived_desc.script_pubkey();
+
         let txs = db_conn.list_wallet_transactions(&[coin.outpoint.txid]);
         let (db_tx, _, _) = txs.first().unwrap();
 
@@ -508,7 +514,10 @@ fn process_proposal_psbt(
             ..Default::default()
         };
 
-        let txout = tx.tx_out(coin.outpoint.vout as usize).unwrap().clone();
+        let txout = TxOut {
+            value: coin.amount,
+            script_pubkey,
+        };
 
         let mut psbtin = Input {
             non_witness_utxo: Some(tx.clone()),
@@ -516,14 +525,7 @@ fn process_proposal_psbt(
             ..Default::default()
         };
 
-        // descs must always have 2 descriptors
-        assert_eq!(descs.len(), 2);
-
-        let receiver_derived_desc = descs[0].derive(coin.derivation_index, secp);
         receiver_derived_desc.update_psbt_in(&mut psbtin);
-
-        let change_derived_desc = descs[1].derive(coin.derivation_index, secp);
-        let script_pubkey = change_derived_desc.script_pubkey();
 
         let proposal = proposal_dummy_checks_bypass(&proposal);
         let proposal = proposal.commit_outputs();
@@ -542,12 +544,8 @@ fn process_proposal_psbt(
         psbt.inputs.push(psbtin);
         psbt.unsigned_tx.input.push(txin);
 
-        let output = TxOut {
-            value: coin.amount,
-            script_pubkey,
-        };
         psbt.outputs.push(Output::default());
-        psbt.unsigned_tx.output.push(output);
+        psbt.unsigned_tx.output.push(txout);
 
         return Ok(psbt);
     }
@@ -562,10 +560,9 @@ pub fn payjoin_receiver_check(
 ) {
     let mut payjoin_receivers = db_conn.get_all_payjoin_receivers();
     for (address, status, receiver, psbt) in payjoin_receivers.iter_mut() {
-        log::info!("[Payjoin] PayjoinReceiverStatus: {:?}", status);
         match status {
             PayjoinReceiverStatus::Pending => {
-                log::info!("[Payjoin] receiver: {}", receiver.pj_uri());
+                log::info!("[Payjoin] {:?}: {}", status, receiver.pj_uri());
                 let (req, ctx) = receiver
                     .extract_req(OHTTP_RELAY)
                     .expect("Failed to extract request");
@@ -603,6 +600,7 @@ pub fn payjoin_receiver_check(
                 }
             }
             PayjoinReceiverStatus::Signing => {
+                log::info!("[Payjoin] {:?}: {}", status, receiver.pj_uri());
                 let psbt = match Psbt::from_str(psbt) {
                     Ok(psbt) => psbt,
                     Err(err) => {
@@ -707,105 +705,143 @@ pub fn payjoin_receiver_check(
 }
 
 fn payjoin_sender_check(db_conn: &mut Box<dyn DatabaseConnection>) {
+    let ohttp_url = Url::from_str(OHTTP_RELAY).expect("Invalid OHTTP relay");
     let payjoin_senders = db_conn.get_all_payjoin_senders();
-    for (bip21, txid, _) in payjoin_senders {
-        log::info!("Payjoin sender: {}", bip21);
-        let psbt = db_conn.spend_tx(&txid).expect("Spend tx not found");
-        let pj_uri = Uri::try_from(bip21.as_str())
-            .expect("Invalid BIP21")
-            .assume_checked()
-            .check_pj_supported()
-            .expect("Invalid PJ BIP21");
+    for (bip21, txid, status, maybe_sender) in payjoin_senders {
+        match status {
+            PayjoinSenderStatus::Pending => {
+                log::info!("[Payjoin] PayjoinSenderStatus: {:?} | {}", status, bip21);
 
-        // TODO(arturgontijo): PDK removes these fields but we need them so GUI can properly sign the inputs
-        let mut input_fields_to_restore = vec![];
-        for (index, input) in psbt.inputs.iter().enumerate() {
-            input_fields_to_restore.push((
-                index,
-                input.witness_script.clone(),
-                input.bip32_derivation.clone(),
-            ));
-        }
+                let psbt = db_conn.spend_tx(&txid).expect("Spend tx not found");
 
-        let new_sender = SenderBuilder::new(psbt, pj_uri)
-            .build_recommended(bitcoin::FeeRate::BROADCAST_MIN)
-            .expect("Failed to build sender");
+                let pj_uri = Uri::try_from(bip21.as_str())
+                    .expect("Invalid BIP21")
+                    .assume_checked()
+                    .check_pj_supported()
+                    .expect("Invalid PJ BIP21");
 
-        // TODO: should just be able to load a sender from the db, and not use the NoopPersister.
-        let sender_storage_token = new_sender
-            .persist(&mut NoopPersister)
-            .expect("Failed to persist sender");
+                let new_sender = SenderBuilder::new(psbt, pj_uri)
+                    .build_recommended(bitcoin::FeeRate::BROADCAST_MIN)
+                    .expect("Failed to build sender");
 
-        let sender =
-            Sender::load(sender_storage_token, &NoopPersister).expect("Failed to load sender");
+                // TODO: should just be able to load a sender from the db, and not use the NoopPersister.
+                let storage_token = new_sender
+                    .persist(&mut NoopPersister)
+                    .expect("Failed to persist sender");
 
-        let ohttp_url = Url::from_str(OHTTP_RELAY).expect("Invalid OHTTP relay");
-        let (post_req, post_ctx) = sender.extract_v2(ohttp_url).expect("Failed to extract v2");
-        // Send original PSBT to the receiver via the BIP77 directory
-        match post_request(post_req.clone()) {
-            Ok(resp) => {
-                let get_ctx = post_ctx
-                    .process_response(resp.bytes().expect("Failed to read response").as_ref())
-                    .expect("Failed to process response");
+                let sender =
+                    Sender::load(storage_token, &NoopPersister).expect("Failed to load sender");
 
-                // Read the response from the receiver via the BIP77 directory
-                let (get_req, ohttp_ctx) = get_ctx
-                    .extract_req(OHTTP_RELAY)
-                    .expect("Failed to extract get request");
-
-                match post_request(get_req.clone()) {
-                    Ok(resp) => {
-                        log::info!("Payjoin sender got a response...");
-
-                        let mut psbt = match get_ctx.process_response(
-                            resp.bytes().expect("Failed to read response").as_ref(),
-                            ohttp_ctx,
-                        ) {
-                            Ok(Some(psbt)) => psbt,
-                            Ok(None) => {
-                                // nothing to do yet, no response
-                                log::warn!("Nothing to do yet, no response...");
-                                continue;
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to process payjoin sender response: {:?}", e);
-                                // TODO: handle error
-                                continue;
-                            }
-                        };
-
-                        // TODO(arturgontijo): Restoring witness_scripts and bip32_bip32_derivation so GUI can sign them
-                        for (index, witness_script, bip32_derivation) in input_fields_to_restore {
-                            psbt.inputs[index].witness_script = witness_script;
-                            psbt.inputs[index].bip32_derivation = bip32_derivation;
-                        }
-
-                        // Store updated Payjoin psbt
-                        log::info!(
-                            "Updated Payjoin psbt: {} -> {}",
+                let (post_req, _) = sender
+                    .extract_v2(ohttp_url.clone())
+                    .expect("Failed to extract v2");
+                // Send original PSBT to the receiver via the BIP77 directory
+                match post_request(post_req.clone()) {
+                    Ok(_) => {
+                        log::info!("[Payjoin] Updating PSBT's STATUS...");
+                        db_conn.update_payjoin_sender_status(
                             txid,
-                            psbt.unsigned_tx.compute_txid()
+                            PayjoinSenderStatus::WaitingReceiver,
+                            Some(sender),
                         );
-                        db_conn.store_spend(&psbt);
-
-                        log::info!("Deleting original Payjoin psbt (txid={})", txid);
-                        db_conn.delete_spend(&txid);
-
-                        // Mark the sender as completed
-                        db_conn.update_payjoin_sender_status(txid, PayjoinSenderStatus::Completed);
                     }
-                    Err(err) => log::error!(
-                        "payjoin_sender_check(getting_psbt): {} -> {}",
-                        get_req.url,
-                        err
-                    ),
+                    Err(e) => log::warn!("Failed to POST original proposal: {:?}", e),
                 }
             }
-            Err(err) => log::error!(
-                "payjoin_sender_check(sending_og_psbt): {} -> {}",
-                post_req.url,
-                err
-            ),
+            PayjoinSenderStatus::WaitingReceiver => {
+                log::info!(
+                    "[Payjoin] PayjoinSenderStatus: {:?} | sender_is_set={}",
+                    status,
+                    maybe_sender.is_some()
+                );
+                if let Some(sender) = maybe_sender {
+                    let (post_req, post_ctx) = sender
+                        .extract_v2(ohttp_url.clone())
+                        .expect("Failed to extract v2");
+
+                    match post_request(post_req.clone()) {
+                        Ok(resp) => {
+                            let get_ctx = post_ctx
+                                .process_response(
+                                    resp.bytes().expect("Must be valid response").as_ref(),
+                                )
+                                .expect("Failed to process response");
+
+                            // Read the response from the receiver via the BIP77 directory
+                            let (get_req, ohttp_ctx) = get_ctx
+                                .extract_req(OHTTP_RELAY)
+                                .expect("Failed to extract get request");
+
+                            let psbt = db_conn.spend_tx(&txid).expect("Spend tx not found");
+
+                            // TODO(arturgontijo): PDK removes these fields but we need them so GUI can properly sign the inputs
+                            let mut input_fields_to_restore = vec![];
+                            for (index, input) in psbt.inputs.iter().enumerate() {
+                                input_fields_to_restore.push((
+                                    index,
+                                    input.witness_script.clone(),
+                                    input.bip32_derivation.clone(),
+                                ));
+                            }
+
+                            match post_request(get_req.clone()) {
+                                Ok(resp) => {
+                                    log::info!("Payjoin sender got a final PSBT...");
+
+                                    let mut psbt = match get_ctx.process_response(
+                                        resp.bytes().expect("Failed to read response").as_ref(),
+                                        ohttp_ctx,
+                                    ) {
+                                        Ok(Some(psbt)) => psbt,
+                                        Ok(None) => {
+                                            // nothing to do yet, no response
+                                            log::warn!("Nothing to do yet, no response...");
+                                            continue;
+                                        }
+                                        Err(e) => {
+                                            log::warn!(
+                                                "Failed to process payjoin sender response: {:?}",
+                                                e
+                                            );
+                                            // TODO: handle error
+                                            continue;
+                                        }
+                                    };
+
+                                    // TODO(arturgontijo): Restoring witness_scripts and bip32_bip32_derivation so GUI can sign them
+                                    for (index, witness_script, bip32_derivation) in
+                                        input_fields_to_restore
+                                    {
+                                        psbt.inputs[index].witness_script = witness_script;
+                                        psbt.inputs[index].bip32_derivation = bip32_derivation;
+                                    }
+
+                                    // Store updated Payjoin psbt
+                                    log::info!(
+                                        "Updated Payjoin psbt: {} -> {}",
+                                        txid,
+                                        psbt.unsigned_tx.compute_txid()
+                                    );
+                                    db_conn.store_spend(&psbt);
+
+                                    log::info!("Deleting original Payjoin psbt (txid={})", txid);
+                                    db_conn.delete_spend(&txid);
+
+                                    // Mark the sender as completed
+                                    db_conn.update_payjoin_sender_status(
+                                        txid,
+                                        PayjoinSenderStatus::Completed,
+                                        None,
+                                    );
+                                }
+                                Err(e) => log::warn!("Failed to get receiver's proposal: {:?}", e),
+                            }
+                        }
+                        Err(e) => log::warn!("Failed to POST original proposal: {:?}", e),
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
