@@ -556,6 +556,14 @@ impl Modal for SignModal {
                         self.signed.insert(fingerprint);
                         let daemon = daemon.clone();
                         merge_signatures(&mut tx.psbt, &psbt);
+
+                        // TODO(arturgontijo): Use better design. Maybe checking for foreign inputs.
+                        // Payjoin Receiver Side
+                        let psbt_ready = psbt.clone().extract_tx();
+                        if tx.bip21.is_none() && psbt_ready.is_err() {
+                            tx.status = SpendStatus::PayjoinProposalReady;
+                        }
+
                         if self.is_saved {
                             return Task::perform(
                                 async move { daemon.update_spend_tx(&psbt).await.map_err(|e| e.into()) },

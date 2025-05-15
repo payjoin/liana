@@ -423,19 +423,41 @@ pub fn signatures<'a>(
 ) -> Element<'a, Message> {
     Column::new()
         .push(if tx.status == SpendStatus::PayjoinInitiated {
-            Container::new(scrollable(
-                Row::new()
-                    .spacing(5)
-                    .align_y(Alignment::Center)
-                    .spacing(10)
-                    .push(p1_bold("Status"))
-                    .push(icon::circle_check_icon().style(theme::text::warning))
-                    .push(
-                        text("      Payjoin initiated")
-                            .bold()
-                            .style(theme::text::warning),
-                    ),
-            ))
+            Container::new(
+                scrollable(
+                    Row::new()
+                        .spacing(5)
+                        .align_y(Alignment::Center)
+                        .spacing(10)
+                        .push(p1_bold("Status"))
+                        .push(icon::circle_check_icon().style(theme::text::payjoin))
+                        .push(text("Payjoin Initiated").bold().style(theme::text::payjoin)),
+                )
+                .direction(scrollable::Direction::Horizontal(
+                    scrollable::Scrollbar::new().width(2).scroller_width(2),
+                )),
+            )
+            .padding(15)
+        } else if tx.status == SpendStatus::PayjoinProposalReady {
+            Container::new(
+                scrollable(
+                    Row::new()
+                        .spacing(5)
+                        .align_y(Alignment::Center)
+                        .spacing(10)
+                        .push(p1_bold("Status"))
+                        .push(icon::circle_check_icon().style(theme::text::payjoin))
+                        .push(
+                            text("Payjoin Proposal Ready")
+                                .bold()
+                                .style(theme::text::payjoin),
+                        ),
+                )
+                .direction(scrollable::Direction::Horizontal(
+                    scrollable::Scrollbar::new().width(2).scroller_width(2),
+                )),
+            )
+            .padding(15)
         } else if let Some(sigs) = tx.path_ready() {
             Container::new(
                 scrollable(

@@ -4,6 +4,7 @@
 
 pub mod d;
 pub mod electrum;
+pub mod payjoin;
 pub mod poller;
 
 use crate::bitcoin::d::{BitcoindError, CachedTxGetter, LSBlockEntry};

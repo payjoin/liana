@@ -62,6 +62,7 @@ pub enum SpendStatus {
     Spent,
     Deprecated,
     PayjoinInitiated,
+    PayjoinProposalReady,
 }
 
 impl SpendTx {
