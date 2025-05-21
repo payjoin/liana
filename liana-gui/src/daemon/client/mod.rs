@@ -5,6 +5,7 @@ use std::iter::FromIterator;
 use async_trait::async_trait;
 use lianad::bip329::Labels;
 use lianad::commands::{GetLabelsBip329Result, UpdateDerivIndexesResult};
+use lianad::payjoin::types::PayjoinInfo;
 use payjoin::{OhttpKeys, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -97,6 +98,10 @@ impl<C: Client + Send + Sync + Debug> Daemon for Lianad<C> {
     }
 
     async fn send_payjoin(&self, _bip21: String, _psbt: &Psbt) -> Result<(), DaemonError> {
+        unimplemented!()
+    }
+
+    async fn get_sender_payjoin(&self, _txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError> {
         unimplemented!()
     }
 

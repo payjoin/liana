@@ -15,6 +15,7 @@ use liana::miniscript::bitcoin::{
 };
 use lianad::bip329::Labels;
 use lianad::commands::UpdateDerivIndexesResult;
+use lianad::payjoin::types::PayjoinInfo;
 use lianad::{
     commands::{CoinStatus, LabelItem, TransactionInfo},
     config::Config,
@@ -111,6 +112,7 @@ pub trait Daemon: Debug {
         ohttp_keys: OhttpKeys,
     ) -> Result<model::GetAddressResult, DaemonError>;
     async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError>;
+    async fn get_sender_payjoin(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError>;
     async fn update_deriv_indexes(
         &self,
         receive: Option<u32>,
@@ -205,6 +207,10 @@ pub trait Daemon: Debug {
                 .cloned()
                 .collect();
 
+            let payjoin_info = self
+                .get_sender_payjoin(&tx.psbt.unsigned_tx.compute_txid())
+                .await?;
+
             spend_txs.push(model::SpendTx::new(
                 tx.updated_at,
                 tx.psbt,
@@ -212,9 +218,7 @@ pub trait Daemon: Debug {
                 &info.descriptors.main,
                 &curve,
                 info.network,
-                // TODO: BIP21 loaded from the backend will always be ignored
-                // because it is not part of the `ListSpendEntry`
-                None,
+                payjoin_info,
             ));
         }
         load_labels(self, &mut spend_txs).await?;

@@ -25,9 +25,10 @@ use crate::{
         },
         Coin, CoinStatus, LabelItem,
     },
+    payjoin::types::{PayjoinReceiverStatus, PayjoinSenderStatus},
 };
 use liana::descriptors::LianaDescriptor;
-use payjoin::{receive::v2::Receiver, send::v2::Sender};
+use payjoin::{bitcoin::Txid, receive::v2::Receiver, send::v2::Sender};
 
 use std::{
     cmp,
@@ -212,48 +213,6 @@ impl SqliteDb {
         }
 
         Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PayjoinSenderStatus {
-    Pending = 0,
-    WaitingReceiver = 1,
-    Completed = 2,
-    // TODO: more specific enums for why it failed
-    Failed = 3,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PayjoinReceiverStatus {
-    Pending = 0,
-    Signing = 1,
-    Completed = 2,
-    // TODO: more specific enums for why it failed
-    Failed = 3,
-}
-
-impl From<i32> for PayjoinSenderStatus {
-    fn from(status: i32) -> Self {
-        match status {
-            0 => PayjoinSenderStatus::Pending,
-            1 => PayjoinSenderStatus::WaitingReceiver,
-            2 => PayjoinSenderStatus::Completed,
-            3 => PayjoinSenderStatus::Failed,
-            _ => panic!("Invalid payjoin sender status: {}", status),
-        }
-    }
-}
-
-impl From<i32> for PayjoinReceiverStatus {
-    fn from(status: i32) -> Self {
-        match status {
-            0 => PayjoinReceiverStatus::Pending,
-            1 => PayjoinReceiverStatus::Signing,
-            2 => PayjoinReceiverStatus::Completed,
-            3 => PayjoinReceiverStatus::Failed,
-            _ => panic!("Invalid payjoin receiver status: {}", status),
-        }
     }
 }
 
@@ -1034,13 +993,19 @@ impl SqliteConn {
     pub fn update_payjoin_receiver_status(
         &mut self,
         address: &bitcoin::Address,
+        txid: bitcoin::Txid,
         status: PayjoinReceiverStatus,
         psbt_str: String,
     ) {
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "UPDATE payjoin_receivers SET status = ?1, psbt = ?2 WHERE address = ?3",
-                rusqlite::params![status as i32, psbt_str, address.to_string()],
+                "UPDATE payjoin_receivers SET status = ?1, txid = ?2, psbt = ?3 WHERE address = ?4",
+                rusqlite::params![
+                    status as i32,
+                    txid[..].to_vec(),
+                    psbt_str,
+                    address.to_string()
+                ],
             )?;
             Ok(())
         })
@@ -1049,34 +1014,47 @@ impl SqliteConn {
 
     pub fn get_all_payjoin_receivers(
         &mut self,
-    ) -> Vec<(bitcoin::Address, PayjoinReceiverStatus, Receiver, String)> {
+    ) -> Vec<(
+        bitcoin::Address,
+        bitcoin::Txid,
+        PayjoinReceiverStatus,
+        Receiver,
+        String,
+    )> {
         db_query(
             &mut self.conn,
-            "SELECT address, status, receiver, psbt FROM payjoin_receivers",
+            "SELECT address, txid, status, receiver, psbt FROM payjoin_receivers",
             rusqlite::params![],
             |row| {
                 let address_str: String = row.get(0)?;
                 let address = bitcoin::Address::from_str(&address_str)
                     .unwrap()
                     .assume_checked();
-                let status: i32 = row.get(1)?;
-                let receiver_json: String = row.get(2)?;
+                let txid_str: String = match row.get(1) {
+                    Ok(txid_str) => txid_str,
+                    Err(_) => String::new(),
+                };
+                let txid = match Txid::from_str(&txid_str) {
+                    Ok(txid) => txid,
+                    Err(_) => Txid::all_zeros(),
+                };
+                let status: i32 = row.get(2)?;
+                let receiver_json: String = row.get(3)?;
                 let receiver: Receiver = serde_json::from_str(&receiver_json).unwrap();
-                let psbt_str: String = row.get(3)?;
-                Ok((address, status.into(), receiver, psbt_str))
+                let psbt_str: String = row.get(4)?;
+                Ok((address, txid, status.into(), receiver, psbt_str))
             },
         )
         .expect("Db must not fail")
     }
 
     /// Create a payjoin sender
-    pub fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
+    pub fn create_payjoin_sender(&mut self, bip21: String, txid: bitcoin::Txid) {
         let status = PayjoinSenderStatus::Pending;
-        let txid = spend_tx_id[..].to_vec();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_senders (bip21, spend_tx_id, status, sender) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![bip21, txid, status as i32, String::new()],
+                "INSERT INTO payjoin_senders (bip21, txid, status, sender) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![bip21, txid[..].to_vec(), status as i32, String::new()],
             )?;
             Ok(())
         })
@@ -1088,7 +1066,7 @@ impl SqliteConn {
     ) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus, Option<Sender>)> {
         db_query(
             &mut self.conn,
-            "SELECT bip21, spend_tx_id, status, sender FROM payjoin_senders",
+            "SELECT bip21, txid, status, sender FROM payjoin_senders",
             rusqlite::params![],
             |row| {
                 let bip21: String = row.get(0)?;
@@ -1110,25 +1088,27 @@ impl SqliteConn {
 
     pub fn update_payjoin_sender_status(
         &mut self,
-        spend_tx_id: bitcoin::Txid,
+        txid: bitcoin::Txid,
         status: PayjoinSenderStatus,
         maybe_sender: Option<Sender>,
+        maybe_new_txid: Option<bitcoin::Txid>,
     ) {
         if let Some(sender) = maybe_sender {
             let sender_json = serde_json::to_string(&sender).unwrap();
             db_exec(&mut self.conn, |db_tx| {
                 db_tx.execute(
-                    "UPDATE payjoin_senders SET status = ?1, sender = ?2 WHERE spend_tx_id = ?3",
-                    rusqlite::params![status as i32, sender_json, spend_tx_id[..].to_vec()],
+                    "UPDATE payjoin_senders SET status = ?1, sender = ?2 WHERE txid = ?3",
+                    rusqlite::params![status as i32, sender_json, txid[..].to_vec()],
                 )?;
                 Ok(())
             })
             .expect("Db must not fail");
         } else {
+            let new_txid = maybe_new_txid.unwrap();
             db_exec(&mut self.conn, |db_tx| {
                 db_tx.execute(
-                    "UPDATE payjoin_senders SET status = ?1 WHERE spend_tx_id = ?2",
-                    rusqlite::params![status as i32, spend_tx_id[..].to_vec()],
+                    "UPDATE payjoin_senders SET status = ?1, sender = ?2, txid = ?3 WHERE txid = ?4",
+                    rusqlite::params![status as i32, String::new(), new_txid[..].to_vec(), txid[..].to_vec()],
                 )?;
                 Ok(())
             })

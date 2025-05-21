@@ -10,6 +10,7 @@ use crate::{
         schema::{DbBlockInfo, DbCoin, DbTip},
         SqliteConn, SqliteDb,
     },
+    payjoin::types::{PayjoinReceiverStatus, PayjoinSenderStatus},
 };
 
 use std::{
@@ -23,7 +24,6 @@ use std::{
 use bip329::Labels;
 use miniscript::bitcoin::{self, bip32, psbt::Psbt, secp256k1, Address, Network, OutPoint, Txid};
 use payjoin::{receive::v2::Receiver, send::v2::Sender};
-use sqlite::{PayjoinReceiverStatus, PayjoinSenderStatus};
 
 /// Information about the wallet.
 ///
@@ -209,17 +209,24 @@ pub trait DatabaseConnection {
     /// Get a all active payjoin receivers
     fn get_all_payjoin_receivers(
         &mut self,
-    ) -> Vec<(bitcoin::Address, PayjoinReceiverStatus, Receiver, String)>;
+    ) -> Vec<(
+        bitcoin::Address,
+        bitcoin::Txid,
+        PayjoinReceiverStatus,
+        Receiver,
+        String,
+    )>;
     /// Update the status of a payjoin receiver
     fn update_payjoin_receiver_status(
         &mut self,
         address: &bitcoin::Address,
+        txid: bitcoin::Txid,
         status: PayjoinReceiverStatus,
         psbt_str: String,
     );
 
     /// Create a payjoin sender
-    fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid);
+    fn create_payjoin_sender(&mut self, bip21: String, txid: bitcoin::Txid);
     /// Get a all active payjoin senders
     fn get_all_payjoin_senders(
         &mut self,
@@ -227,9 +234,10 @@ pub trait DatabaseConnection {
     /// Update the status of a payjoin sender
     fn update_payjoin_sender_status(
         &mut self,
-        spend_tx_id: bitcoin::Txid,
+        txid: bitcoin::Txid,
         status: PayjoinSenderStatus,
         maybe_sender: Option<Sender>,
+        maybe_new_txid: Option<bitcoin::Txid>,
     );
 
     // -------
@@ -467,21 +475,28 @@ impl DatabaseConnection for SqliteConn {
 
     fn get_all_payjoin_receivers(
         &mut self,
-    ) -> Vec<(bitcoin::Address, PayjoinReceiverStatus, Receiver, String)> {
+    ) -> Vec<(
+        bitcoin::Address,
+        bitcoin::Txid,
+        PayjoinReceiverStatus,
+        Receiver,
+        String,
+    )> {
         self.get_all_payjoin_receivers()
     }
 
     fn update_payjoin_receiver_status(
         &mut self,
         address: &bitcoin::Address,
+        txid: bitcoin::Txid,
         status: PayjoinReceiverStatus,
         psbt_str: String,
     ) {
-        self.update_payjoin_receiver_status(address, status, psbt_str)
+        self.update_payjoin_receiver_status(address, txid, status, psbt_str)
     }
 
-    fn create_payjoin_sender(&mut self, bip21: String, spend_tx_id: bitcoin::Txid) {
-        self.create_payjoin_sender(bip21, spend_tx_id)
+    fn create_payjoin_sender(&mut self, bip21: String, txid: bitcoin::Txid) {
+        self.create_payjoin_sender(bip21, txid)
     }
 
     fn get_all_payjoin_senders(
@@ -494,9 +509,10 @@ impl DatabaseConnection for SqliteConn {
         &mut self,
         spend_tx_id: bitcoin::Txid,
         status: PayjoinSenderStatus,
-        sender: Option<Sender>,
+        maybe_sender: Option<Sender>,
+        maybe_new_txid: Option<bitcoin::Txid>,
     ) {
-        self.update_payjoin_sender_status(spend_tx_id, status, sender)
+        self.update_payjoin_sender_status(spend_tx_id, status, maybe_sender, maybe_new_txid)
     }
 }
 

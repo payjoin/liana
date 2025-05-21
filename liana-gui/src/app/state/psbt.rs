@@ -187,13 +187,12 @@ impl PsbtState {
             Message::View(view::Message::Spend(view::SpendTxMessage::PayjoinInitiated)) => {
                 self.tx.status = SpendStatus::PayjoinInitiated;
                 self.modal = None;
-                if let Some(bip21) = self.tx.bip21.clone() {
-                    // TODO: remove clone
+                if let Some(payjoin_info) = self.tx.payjoin_info.clone() {
                     let psbt = self.tx.psbt.clone();
                     return Task::perform(
                         async move {
                             daemon
-                                .send_payjoin(bip21.clone(), &psbt)
+                                .send_payjoin(payjoin_info.bip21, &psbt)
                                 .await
                                 .map_err(|e| e.into())
                         },
@@ -560,7 +559,7 @@ impl Modal for SignModal {
                         // TODO(arturgontijo): Use better design. Maybe checking for foreign inputs.
                         // Payjoin Receiver Side
                         let psbt_ready = psbt.clone().extract_tx();
-                        if tx.bip21.is_none() && psbt_ready.is_err() {
+                        if tx.payjoin_info.is_none() && psbt_ready.is_err() {
                             tx.status = SpendStatus::PayjoinProposalReady;
                         }
 

@@ -2,10 +2,10 @@ use crate::{
     bitcoin::{BitcoinInterface, Block, BlockChainTip, MempoolEntry, SyncProgress, UTxO},
     config::{BitcoinConfig, Config},
     database::{
-        sqlite::PayjoinReceiverStatus, BlockInfo, Coin, CoinStatus, DatabaseConnection,
-        DatabaseInterface, LabelItem, Wallet,
+        BlockInfo, Coin, CoinStatus, DatabaseConnection, DatabaseInterface, LabelItem, Wallet,
     },
     datadir::DataDirectory,
+    payjoin::types::{PayjoinReceiverStatus, PayjoinSenderStatus},
     DaemonControl, DaemonHandle,
 };
 use liana::descriptors;
@@ -542,13 +542,20 @@ impl DatabaseConnection for DummyDatabase {
 
     fn get_all_payjoin_receivers(
         &mut self,
-    ) -> Vec<(bitcoin::Address, PayjoinReceiverStatus, Receiver, String)> {
+    ) -> Vec<(
+        bitcoin::Address,
+        bitcoin::Txid,
+        PayjoinReceiverStatus,
+        Receiver,
+        String,
+    )> {
         todo!()
     }
 
     fn update_payjoin_receiver_status(
         &mut self,
         _address: &bitcoin::Address,
+        _txid: bitcoin::Txid,
         _status: PayjoinReceiverStatus,
         _psbt_str: String,
     ) {
@@ -561,20 +568,16 @@ impl DatabaseConnection for DummyDatabase {
 
     fn get_all_payjoin_senders(
         &mut self,
-    ) -> Vec<(
-        String,
-        bitcoin::Txid,
-        crate::database::sqlite::PayjoinSenderStatus,
-        Option<Sender>,
-    )> {
+    ) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus, Option<Sender>)> {
         todo!()
     }
 
     fn update_payjoin_sender_status(
         &mut self,
         _spend_tx_id: bitcoin::Txid,
-        _status: crate::database::sqlite::PayjoinSenderStatus,
+        _status: PayjoinSenderStatus,
         _maybe_sender: Option<Sender>,
+        _maybe_new_txid: Option<bitcoin::Txid>,
     ) {
         todo!()
     }

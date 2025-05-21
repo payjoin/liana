@@ -8,6 +8,7 @@ use crate::{
     bitcoin::BitcoinInterface,
     database::{Coin, DatabaseConnection, DatabaseInterface},
     miniscript::bitcoin::absolute::LockTime,
+    payjoin::types::PayjoinInfo,
     poller::PollerMessage,
     DaemonControl, VERSION,
 };
@@ -43,7 +44,7 @@ use miniscript::{
     },
     psbt::PsbtExt,
 };
-use payjoin::{persist::NoopPersister, OhttpKeys, Url};
+use payjoin::{bitcoin::Txid, persist::NoopPersister, OhttpKeys, Url};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -403,6 +404,39 @@ impl DaemonControl {
         let txid = psbt.clone().extract_tx().unwrap().compute_txid();
         db_conn.create_payjoin_sender(bip21, txid);
         Ok(())
+    }
+
+    /// Get Payjoin URI (BIP21) and its sender/receiver status by txid
+    pub fn get_sender_payjoin(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, CommandError> {
+        let mut db_conn = self.db.connection();
+
+        let mut receiver_status = None;
+        for (_, db_txid, status, _, _) in db_conn.get_all_payjoin_receivers() {
+            if &db_txid == txid {
+                receiver_status = Some(status);
+                break;
+            }
+        }
+
+        let mut bip21 = String::new();
+        let mut sender_status = None;
+        for (db_bip21, db_txid, status, _) in db_conn.get_all_payjoin_senders() {
+            if &db_txid == txid {
+                sender_status = Some(status);
+                bip21 = db_bip21;
+                break;
+            }
+        }
+
+        if receiver_status.is_some() || sender_status.is_some() {
+            Ok(Some(PayjoinInfo {
+                bip21,
+                sender_status,
+                receiver_status,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Update derivation indexes
@@ -854,7 +888,7 @@ impl DaemonControl {
         for index in 0..spend_psbt.inputs.len() {
             match spend_psbt.finalize_inp_mut(&self.secp, index) {
                 Ok(_) => log::info!("Finalizing input at: {}", index),
-                Err(_) => log::info!("Failed to finalizing input at: {}", index),
+                Err(_) => log::warn!("Not finalizing input at: {}", index),
             }
         }
 

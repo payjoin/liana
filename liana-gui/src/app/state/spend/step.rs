@@ -18,7 +18,10 @@ use liana::{
     },
     spend::{SpendCreationError, MAX_FEERATE},
 };
-use lianad::commands::ListCoinsEntry;
+use lianad::{
+    commands::ListCoinsEntry,
+    payjoin::types::{PayjoinInfo, PayjoinReceiverStatus, PayjoinSenderStatus},
+};
 
 use liana_ui::{component::form, widget::Element};
 use payjoin::Uri;
@@ -966,7 +969,18 @@ impl SaveSpend {
 impl Step for SaveSpend {
     fn load(&mut self, _coins: &[Coin], _tip_height: i32, draft: &TransactionDraft) {
         let (psbt, warnings) = draft.generated.clone().unwrap();
+
         let bip21 = draft.recipients.get(0).unwrap().bip21.value.clone();
+        let payjoin_info = if bip21.is_empty() {
+            None
+        } else {
+            Some(PayjoinInfo {
+                bip21,
+                sender_status: Some(PayjoinSenderStatus::Pending),
+                receiver_status: Some(PayjoinReceiverStatus::Pending),
+            })
+        };
+
         let mut tx = SpendTx::new(
             None,
             psbt,
@@ -974,7 +988,7 @@ impl Step for SaveSpend {
             &self.wallet.main_descriptor,
             &self.curve,
             draft.network,
-            Some(bip21),
+            payjoin_info,
         );
         tx.labels.clone_from(&draft.labels);
 

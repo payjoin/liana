@@ -367,10 +367,15 @@ impl HotSigner {
             .iter()
             .filter_map(|psbt_in| psbt_in.witness_utxo.clone())
             .collect();
-        // TODO(arturgontijo): Skip for now...
-        // if prevouts.len() != psbt.inputs.len() {
-        //     return Err(SignerError::IncompletePsbt);
-        // }
+        if prevouts.len() != psbt.inputs.len() {
+            // TODO(arturgontijo): Skip for now...
+            log::warn!(
+                "Not throwing SignerError::IncompletePsbt: prevouts.len({}) != psbt.inputs.len({})",
+                prevouts.len(),
+                psbt.inputs.len()
+            );
+            // return Err(SignerError::IncompletePsbt);
+        }
 
         // Sign each input in the PSBT.
         for i in 0..psbt.inputs.len() {

@@ -1,9 +1,7 @@
 use crate::{
-    bitcoin::{
-        payjoin::{receiver::payjoin_receiver_check, sender::payjoin_sender_check},
-        BitcoinInterface, BlockChainTip, UTxO, UTxOAddress,
-    },
+    bitcoin::{BitcoinInterface, BlockChainTip, UTxO, UTxOAddress},
     database::{Coin, DatabaseConnection, DatabaseInterface},
+    payjoin::{receiver::payjoin_receiver_check, sender::payjoin_sender_check},
 };
 
 use std::{collections::HashSet, convert::TryInto, sync, thread, time};
