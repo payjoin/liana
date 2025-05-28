@@ -5,11 +5,11 @@ use crate::{
         BlockInfo, Coin, CoinStatus, DatabaseConnection, DatabaseInterface, LabelItem, Wallet,
     },
     datadir::DataDirectory,
-    payjoin::types::{PayjoinReceiverStatus, PayjoinSenderStatus},
+    payjoin::db::{SessionId, SessionWrapper},
     DaemonControl, DaemonHandle,
 };
 use liana::descriptors;
-use payjoin::{receive::v2::Receiver, send::v2::Sender};
+use payjoin::{receive::v2::ReceiverSessionEvent, send::v2::SenderSessionEvent};
 
 use std::convert::TryInto;
 use std::{
@@ -531,54 +531,65 @@ impl DatabaseConnection for DummyDatabase {
         todo!()
     }
 
-    fn create_payjoin_receiver(
+    fn payjoin_get_all_receiver_sessions(
         &mut self,
-        _address: &bitcoin::Address,
-        _receiver: Receiver,
-        _psbt: String,
-    ) {
-        todo!()
-    }
-
-    fn get_all_payjoin_receivers(
-        &mut self,
-    ) -> Vec<(
-        bitcoin::Address,
-        bitcoin::Txid,
-        PayjoinReceiverStatus,
-        Receiver,
-        String,
-    )> {
+    ) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)> {
         todo!()
     }
 
     fn update_payjoin_receiver_status(
         &mut self,
-        _address: &bitcoin::Address,
-        _txid: bitcoin::Txid,
-        _status: PayjoinReceiverStatus,
-        _psbt_str: String,
+        _session_id: &SessionId,
+        _session: SessionWrapper<ReceiverSessionEvent>,
     ) {
         todo!()
     }
 
-    fn create_payjoin_sender(&mut self, _bip21: String, _spend_tx_id: bitcoin::Txid) {
-        todo!()
-    }
-
-    fn get_all_payjoin_senders(
+    fn payjoin_save_sender_session(
         &mut self,
-    ) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus, Option<Sender>)> {
+        _session_id: &SessionId,
+        _session: SessionWrapper<SenderSessionEvent>,
+    ) {
         todo!()
     }
 
     fn update_payjoin_sender_status(
         &mut self,
-        _spend_tx_id: bitcoin::Txid,
-        _status: PayjoinSenderStatus,
-        _maybe_sender: Option<Sender>,
-        _maybe_new_txid: Option<bitcoin::Txid>,
+        _session_id: &SessionId,
+        _session: SessionWrapper<SenderSessionEvent>,
     ) {
+        todo!()
+    }
+
+    fn payjoin_next_id(&mut self) -> u64 {
+        todo!()
+    }
+
+    fn payjoin_save_receiver_session(
+        &mut self,
+        _session_id: &SessionId,
+        _session: SessionWrapper<ReceiverSessionEvent>,
+    ) {
+        todo!()
+    }
+
+    fn payjoin_get_receiver_session(
+        &mut self,
+        _session_id: &SessionId,
+    ) -> Option<SessionWrapper<ReceiverSessionEvent>> {
+        todo!()
+    }
+
+    fn payjoin_get_sender_session(
+        &mut self,
+        _session_id: &SessionId,
+    ) -> Option<SessionWrapper<SenderSessionEvent>> {
+        todo!()
+    }
+
+    fn payjoin_get_all_sender_sessions(
+        &mut self,
+    ) -> Vec<(SessionId, SessionWrapper<SenderSessionEvent>)> {
         todo!()
     }
 }

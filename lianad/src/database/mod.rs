@@ -10,7 +10,7 @@ use crate::{
         schema::{DbBlockInfo, DbCoin, DbTip},
         SqliteConn, SqliteDb,
     },
-    payjoin::types::{PayjoinReceiverStatus, PayjoinSenderStatus},
+    payjoin::db::{SessionId, SessionWrapper},
 };
 
 use std::{
@@ -23,7 +23,7 @@ use std::{
 
 use bip329::Labels;
 use miniscript::bitcoin::{self, bip32, psbt::Psbt, secp256k1, Address, Network, OutPoint, Txid};
-use payjoin::{receive::v2::Receiver, send::v2::Sender};
+use payjoin::{receive::v2::ReceiverSessionEvent, send::v2::SenderSessionEvent};
 
 /// Information about the wallet.
 ///
@@ -199,45 +199,56 @@ pub trait DatabaseConnection {
 
     /// Payjoin
 
-    /// Create a payjoin receiver
-    fn create_payjoin_receiver(
+    /// Get the next Session Id
+    fn payjoin_next_id(&mut self) -> u64;
+
+    /// Save Receiver Session
+    fn payjoin_save_receiver_session(
         &mut self,
-        address: &bitcoin::Address,
-        receiver: Receiver,
-        psbt_str: String,
+        session_id: &SessionId,
+        session: SessionWrapper<ReceiverSessionEvent>,
     );
-    /// Get a all active payjoin receivers
-    fn get_all_payjoin_receivers(
+
+    /// Get a Receiver Session by Id
+    fn payjoin_get_receiver_session(
         &mut self,
-    ) -> Vec<(
-        bitcoin::Address,
-        bitcoin::Txid,
-        PayjoinReceiverStatus,
-        Receiver,
-        String,
-    )>;
+        session_id: &SessionId,
+    ) -> Option<SessionWrapper<ReceiverSessionEvent>>;
+
+    /// Get all Receiver Sessions
+    fn payjoin_get_all_receiver_sessions(
+        &mut self,
+    ) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)>;
+
     /// Update the status of a payjoin receiver
     fn update_payjoin_receiver_status(
         &mut self,
-        address: &bitcoin::Address,
-        txid: bitcoin::Txid,
-        status: PayjoinReceiverStatus,
-        psbt_str: String,
+        session_id: &SessionId,
+        session: SessionWrapper<ReceiverSessionEvent>,
     );
 
     /// Create a payjoin sender
-    fn create_payjoin_sender(&mut self, bip21: String, txid: bitcoin::Txid);
-    /// Get a all active payjoin senders
-    fn get_all_payjoin_senders(
+    fn payjoin_save_sender_session(
         &mut self,
-    ) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus, Option<Sender>)>;
+        session_id: &SessionId,
+        session: SessionWrapper<SenderSessionEvent>,
+    );
+
+    fn payjoin_get_sender_session(
+        &mut self,
+        session_id: &SessionId,
+    ) -> Option<SessionWrapper<SenderSessionEvent>>;
+
+    /// Get a all active payjoin senders
+    fn payjoin_get_all_sender_sessions(
+        &mut self,
+    ) -> Vec<(SessionId, SessionWrapper<SenderSessionEvent>)>;
+
     /// Update the status of a payjoin sender
     fn update_payjoin_sender_status(
         &mut self,
-        txid: bitcoin::Txid,
-        status: PayjoinSenderStatus,
-        maybe_sender: Option<Sender>,
-        maybe_new_txid: Option<bitcoin::Txid>,
+        session_id: &SessionId,
+        session: SessionWrapper<SenderSessionEvent>,
     );
 
     // -------
@@ -464,55 +475,66 @@ impl DatabaseConnection for SqliteConn {
             .collect()
     }
 
-    fn create_payjoin_receiver(
-        &mut self,
-        address: &bitcoin::Address,
-        receiver: Receiver,
-        psbt_str: String,
-    ) {
-        self.create_payjoin_receiver(address, receiver, psbt_str)
+    fn payjoin_next_id(&mut self) -> u64 {
+        self.payjoin_next_id()
     }
 
-    fn get_all_payjoin_receivers(
+    fn payjoin_save_receiver_session(
         &mut self,
-    ) -> Vec<(
-        bitcoin::Address,
-        bitcoin::Txid,
-        PayjoinReceiverStatus,
-        Receiver,
-        String,
-    )> {
-        self.get_all_payjoin_receivers()
+        session_id: &SessionId,
+        session: SessionWrapper<ReceiverSessionEvent>,
+    ) {
+        self.payjoin_save_receiver_session(session_id, session)
+    }
+
+    fn payjoin_get_receiver_session(
+        &mut self,
+        session_id: &SessionId,
+    ) -> Option<SessionWrapper<ReceiverSessionEvent>> {
+        self.payjoin_get_receiver_session(session_id)
+    }
+
+    fn payjoin_get_all_receiver_sessions(
+        &mut self,
+    ) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)> {
+        self.payjoin_get_all_receiver_sessions()
     }
 
     fn update_payjoin_receiver_status(
         &mut self,
-        address: &bitcoin::Address,
-        txid: bitcoin::Txid,
-        status: PayjoinReceiverStatus,
-        psbt_str: String,
+        session_id: &SessionId,
+        session: SessionWrapper<ReceiverSessionEvent>,
     ) {
-        self.update_payjoin_receiver_status(address, txid, status, psbt_str)
+        self.update_payjoin_receiver_status(session_id, session)
     }
 
-    fn create_payjoin_sender(&mut self, bip21: String, txid: bitcoin::Txid) {
-        self.create_payjoin_sender(bip21, txid)
-    }
-
-    fn get_all_payjoin_senders(
+    fn payjoin_save_sender_session(
         &mut self,
-    ) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus, Option<Sender>)> {
-        self.get_all_payjoin_senders()
+        session_id: &SessionId,
+        session: SessionWrapper<SenderSessionEvent>,
+    ) {
+        self.payjoin_save_sender_session(session_id, session)
+    }
+
+    fn payjoin_get_sender_session(
+        &mut self,
+        session_id: &SessionId,
+    ) -> Option<SessionWrapper<SenderSessionEvent>> {
+        self.payjoin_get_sender_session(session_id)
+    }
+
+    fn payjoin_get_all_sender_sessions(
+        &mut self,
+    ) -> Vec<(SessionId, SessionWrapper<SenderSessionEvent>)> {
+        self.payjoin_get_all_sender_sessions()
     }
 
     fn update_payjoin_sender_status(
         &mut self,
-        spend_tx_id: bitcoin::Txid,
-        status: PayjoinSenderStatus,
-        maybe_sender: Option<Sender>,
-        maybe_new_txid: Option<bitcoin::Txid>,
+        session_id: &SessionId,
+        session: SessionWrapper<SenderSessionEvent>,
     ) {
-        self.update_payjoin_sender_status(spend_tx_id, status, maybe_sender, maybe_new_txid)
+        self.update_payjoin_sender_status(session_id, session)
     }
 }
 

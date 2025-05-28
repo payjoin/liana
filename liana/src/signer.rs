@@ -362,6 +362,7 @@ impl HotSigner {
         let master_fingerprint = self.fingerprint(secp);
         let mut sighash_cache = sighash::SighashCache::new(&psbt.unsigned_tx);
 
+        // TODO(arturgontijo): my_prevouts (my psbt.inputs only)
         let prevouts: Vec<_> = psbt
             .inputs
             .iter()

@@ -20,7 +20,7 @@ use liana::{
 };
 use lianad::{
     commands::ListCoinsEntry,
-    payjoin::types::{PayjoinInfo, PayjoinReceiverStatus, PayjoinSenderStatus},
+    payjoin::types::{PayjoinInfo, PayjoinStatus},
 };
 
 use liana_ui::{component::form, widget::Element};
@@ -976,8 +976,8 @@ impl Step for SaveSpend {
         } else {
             Some(PayjoinInfo {
                 bip21,
-                sender_status: Some(PayjoinSenderStatus::Pending),
-                receiver_status: Some(PayjoinReceiverStatus::Pending),
+                sender_status: Some(PayjoinStatus::Pending),
+                receiver_status: Some(PayjoinStatus::Pending),
             })
         };
 

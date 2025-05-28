@@ -559,7 +559,7 @@ impl Modal for SignModal {
                         // TODO(arturgontijo): Use better design. Maybe checking for foreign inputs.
                         // Payjoin Receiver Side
                         let psbt_ready = psbt.clone().extract_tx();
-                        if tx.payjoin_info.is_none() && psbt_ready.is_err() {
+                        if psbt_ready.is_err() {
                             tx.status = SpendStatus::PayjoinProposalReady;
                         }
 

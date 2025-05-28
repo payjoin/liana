@@ -1,14 +1,11 @@
-use std::error::Error;
+use std::{error::Error, time::Duration};
 
 use miniscript::{
     bitcoin::{secp256k1, Psbt, ScriptBuf, TxOut},
     psbt::PsbtExt,
 };
 
-use payjoin::{
-    bitcoin::Amount,
-    receive::v2::{UncheckedProposal, WantsOutputs},
-};
+use payjoin::bitcoin::Amount;
 
 pub const OHTTP_RELAY: &str = "https://pj.bobspacebkk.com";
 
@@ -22,6 +19,7 @@ pub fn post_request(req: payjoin::Request) -> Result<reqwest::blocking::Response
         .post(req.url)
         .header("Content-Type", req.content_type)
         .body(req.body)
+        .timeout(Duration::from_secs(5))
         .send()
     {
         Ok(r) => Ok(r),
@@ -61,21 +59,4 @@ pub fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::Ver
     for index in witness_utxo_to_clean {
         psbt.inputs[index].witness_utxo = None;
     }
-}
-
-pub fn proposal_dummy_checks_bypass(proposal: &UncheckedProposal) -> WantsOutputs {
-    let proposal = proposal
-        .clone()
-        .check_broadcast_suitability(None, |_| Ok(true))
-        .expect("Failed to check broadcast suitability");
-    let proposal = proposal
-        .check_inputs_not_owned(|_input| Ok(false))
-        .expect("Failed to check inputs not owned");
-    let proposal = proposal
-        .check_no_inputs_seen_before(|_| Ok(false))
-        .expect("Failed to check no inputs seen before");
-    let proposal = proposal
-        .identify_receiver_outputs(|_| Ok(true))
-        .expect("Failed to identify receiver outputs");
-    proposal
 }

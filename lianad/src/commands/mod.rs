@@ -8,7 +8,10 @@ use crate::{
     bitcoin::BitcoinInterface,
     database::{Coin, DatabaseConnection, DatabaseInterface},
     miniscript::bitcoin::absolute::LockTime,
-    payjoin::types::PayjoinInfo,
+    payjoin::{
+        db::{ReceiverPersister, SenderPersister},
+        types::PayjoinInfo,
+    },
     poller::PollerMessage,
     DaemonControl, VERSION,
 };
@@ -30,9 +33,9 @@ use utils::{
 
 use std::{
     collections::{hash_map, HashMap, HashSet},
-    convert::TryInto,
+    convert::{TryFrom, TryInto},
     fmt,
-    sync::{self, mpsc},
+    sync::{self, mpsc, Arc},
     time::SystemTime,
 };
 
@@ -44,7 +47,12 @@ use miniscript::{
     },
     psbt::PsbtExt,
 };
-use payjoin::{bitcoin::Txid, persist::NoopPersister, OhttpKeys, Url};
+use payjoin::{
+    bitcoin::{FeeRate, Txid},
+    receive::v2::{Receiver, UninitializedReceiver},
+    send::v2::SenderBuilder,
+    OhttpKeys, Uri, UriExt, Url,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,31 +386,50 @@ impl DaemonControl {
             .derive(new_index, &self.secp)
             .address(self.config.bitcoin_config.network);
 
-        let pj_receiver = payjoin::receive::v2::NewReceiver::new(
+        let persister = ReceiverPersister::new(Arc::new(self.db.clone())).unwrap();
+        let session = Receiver::<UninitializedReceiver>::create_session(
             address.clone(),
             directory.clone(),
             ohttp_keys.clone(),
             None,
         )
+        .save(&persister)
         .unwrap();
 
-        let storage_token = pj_receiver.persist(&mut NoopPersister).unwrap();
-        let receiver =
-            payjoin::receive::v2::Receiver::load(storage_token, &mut NoopPersister).unwrap();
-
-        let mut payjoin_uri = receiver.pj_uri();
+        let mut payjoin_uri = session.pj_uri();
         // HACK: hardcoded amount for now
         payjoin_uri.amount = Some(bitcoin::Amount::from_sat(10_000));
 
-        db_conn.create_payjoin_receiver(&address, receiver.clone(), "".to_string());
         GetAddressResult::new(address, new_index, payjoin_uri.to_string())
     }
 
-    /// Initate a payjoin sender
+    /// Initiate a payjoin sender
     pub fn init_payjoin_sender(&self, bip21: String, psbt: &Psbt) -> Result<(), CommandError> {
-        let mut db_conn = self.db.connection();
-        let txid = psbt.clone().extract_tx().unwrap().compute_txid();
-        db_conn.create_payjoin_sender(bip21, txid);
+        let uri = Uri::try_from(bip21.clone())
+            .map_err(|e| format!("Failed to create URI from BIP21: {}", e))
+            .unwrap();
+        let uri = uri.assume_checked();
+        let uri = uri
+            .check_pj_supported()
+            .map_err(|_| format!("URI does not support Payjoin"))
+            .unwrap();
+
+        let persister = SenderPersister::new(Arc::new(self.db.clone())).unwrap();
+        let _sender = SenderBuilder::new(psbt.clone(), uri)
+            .build_recommended(FeeRate::BROADCAST_MIN)
+            .save(&persister)
+            .unwrap();
+
+        let session_id = persister.session_id;
+        if let Some(mut session) = self.db.connection().payjoin_get_sender_session(&session_id) {
+            session.bip21 = Some(bip21);
+            session.psbt = Some(psbt.clone());
+            session.txid = Some(psbt.unsigned_tx.compute_txid());
+            self.db
+                .connection()
+                .update_payjoin_sender_status(&session_id, session);
+        }
+
         Ok(())
     }
 
@@ -411,20 +438,24 @@ impl DaemonControl {
         let mut db_conn = self.db.connection();
 
         let mut receiver_status = None;
-        for (_, db_txid, status, _, _) in db_conn.get_all_payjoin_receivers() {
-            if &db_txid == txid {
-                receiver_status = Some(status);
-                break;
+        for (_, session) in db_conn.payjoin_get_all_receiver_sessions() {
+            if let Some(db_txid) = session.txid {
+                if &db_txid == txid {
+                    receiver_status = Some(session.status);
+                    break;
+                }
             }
         }
 
         let mut bip21 = String::new();
         let mut sender_status = None;
-        for (db_bip21, db_txid, status, _) in db_conn.get_all_payjoin_senders() {
-            if &db_txid == txid {
-                sender_status = Some(status);
-                bip21 = db_bip21;
-                break;
+        for (_, session) in db_conn.payjoin_get_all_sender_sessions() {
+            if let Some(db_txid) = session.txid {
+                if &db_txid == txid {
+                    sender_status = Some(session.status);
+                    bip21 = session.bip21.unwrap_or_default();
+                    break;
+                }
             }
         }
 

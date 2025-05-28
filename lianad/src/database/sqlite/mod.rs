@@ -25,17 +25,16 @@ use crate::{
         },
         Coin, CoinStatus, LabelItem,
     },
-    payjoin::types::{PayjoinReceiverStatus, PayjoinSenderStatus},
+    payjoin::db::{SessionId, SessionWrapper},
 };
 use liana::descriptors::LianaDescriptor;
-use payjoin::{bitcoin::Txid, receive::v2::Receiver, send::v2::Sender};
+use payjoin::{receive::v2::ReceiverSessionEvent, send::v2::SenderSessionEvent};
 
 use std::{
     cmp,
     collections::{HashMap, HashSet},
     convert::TryInto,
     fmt, io, path,
-    str::FromStr,
 };
 
 use miniscript::bitcoin::{
@@ -967,120 +966,147 @@ impl SqliteConn {
         .expect("Db must not fail");
     }
 
-    /// Create a payjoin receiver, TODO: strong type to bitcoin::Address?
-    pub fn create_payjoin_receiver(
+    /// Create a payjoin receiver
+    pub fn payjoin_next_id(&mut self) -> u64 {
+        let count = db_query(
+            &mut self.conn,
+            "SELECT COUNT(*) FROM payjoin_receivers",
+            rusqlite::params![],
+            |row| {
+                let count: u64 = row.get(0)?;
+                Ok(count)
+            },
+        )
+        .expect("Db must not fail");
+        if let Some(count) = count.first() {
+            return *count;
+        } else {
+            return 0;
+        }
+    }
+
+    /// Create new Receiver Session
+    pub fn payjoin_save_receiver_session(
         &mut self,
-        address: &bitcoin::Address,
-        receiver: Receiver,
-        psbt_str: String,
+        session_id: &SessionId,
+        session: SessionWrapper<ReceiverSessionEvent>,
     ) {
-        let receiver_json = serde_json::to_string(&receiver).unwrap();
+        let session_ser = serde_json::to_vec(&session).unwrap();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_receivers (address, status, receiver, psbt) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![
-                    address.to_string(),
-                    PayjoinReceiverStatus::Pending as i32,
-                    receiver_json,
-                    psbt_str
-                ],
+                "INSERT INTO payjoin_receivers (session_id, session) VALUES (?1, ?2)",
+                rusqlite::params![session_id.0, session_ser],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
+    }
+
+    /// Get a Receiver Session by Id
+    pub fn payjoin_get_receiver_session(
+        &mut self,
+        session_id: &SessionId,
+    ) -> Option<SessionWrapper<ReceiverSessionEvent>> {
+        db_query(
+            &mut self.conn,
+            "SELECT session FROM payjoin_receivers WHERE session_id = ?1",
+            rusqlite::params![session_id.0],
+            |row| {
+                let session_ser: Vec<u8> = row.get(0)?;
+                let session: SessionWrapper<ReceiverSessionEvent> =
+                    serde_json::from_slice(&session_ser).unwrap();
+                Ok(session)
+            },
+        )
+        .expect("Db must not fail")
+        .pop()
     }
 
     pub fn update_payjoin_receiver_status(
         &mut self,
-        address: &bitcoin::Address,
-        txid: bitcoin::Txid,
-        status: PayjoinReceiverStatus,
-        psbt_str: String,
+        session_id: &SessionId,
+        session: SessionWrapper<ReceiverSessionEvent>,
     ) {
+        let session_ser = serde_json::to_vec(&session).unwrap();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "UPDATE payjoin_receivers SET status = ?1, txid = ?2, psbt = ?3 WHERE address = ?4",
-                rusqlite::params![
-                    status as i32,
-                    txid[..].to_vec(),
-                    psbt_str,
-                    address.to_string()
-                ],
+                "UPDATE payjoin_receivers SET session = ?1 WHERE session_id = ?2",
+                rusqlite::params![session_ser, session_id.0],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
     }
 
-    pub fn get_all_payjoin_receivers(
+    pub fn payjoin_get_all_receiver_sessions(
         &mut self,
-    ) -> Vec<(
-        bitcoin::Address,
-        bitcoin::Txid,
-        PayjoinReceiverStatus,
-        Receiver,
-        String,
-    )> {
+    ) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)> {
         db_query(
             &mut self.conn,
-            "SELECT address, txid, status, receiver, psbt FROM payjoin_receivers",
+            "SELECT session_id, session FROM payjoin_receivers",
             rusqlite::params![],
             |row| {
-                let address_str: String = row.get(0)?;
-                let address = bitcoin::Address::from_str(&address_str)
-                    .unwrap()
-                    .assume_checked();
-                let txid_str: String = match row.get(1) {
-                    Ok(txid_str) => txid_str,
-                    Err(_) => String::new(),
-                };
-                let txid = match Txid::from_str(&txid_str) {
-                    Ok(txid) => txid,
-                    Err(_) => Txid::all_zeros(),
-                };
-                let status: i32 = row.get(2)?;
-                let receiver_json: String = row.get(3)?;
-                let receiver: Receiver = serde_json::from_str(&receiver_json).unwrap();
-                let psbt_str: String = row.get(4)?;
-                Ok((address, txid, status.into(), receiver, psbt_str))
+                let id: u64 = row.get(0)?;
+                let session_id = SessionId::new(id);
+                let session_ser: Vec<u8> = row.get(1)?;
+                let session: SessionWrapper<ReceiverSessionEvent> =
+                    serde_json::from_slice(&session_ser).unwrap();
+                Ok((session_id, session))
             },
         )
         .expect("Db must not fail")
     }
 
     /// Create a payjoin sender
-    pub fn create_payjoin_sender(&mut self, bip21: String, txid: bitcoin::Txid) {
-        let status = PayjoinSenderStatus::Pending;
+    pub fn payjoin_save_sender_session(
+        &mut self,
+        session_id: &SessionId,
+        session: SessionWrapper<SenderSessionEvent>,
+    ) {
+        let session_ser = serde_json::to_vec(&session).unwrap();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_senders (bip21, txid, status, sender) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![bip21, txid[..].to_vec(), status as i32, String::new()],
+                "INSERT INTO payjoin_senders (session_id, session) VALUES (?1, ?2)",
+                rusqlite::params![session_id.0, session_ser],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
     }
 
-    pub fn get_all_payjoin_senders(
+    pub fn payjoin_get_sender_session(
         &mut self,
-    ) -> Vec<(String, bitcoin::Txid, PayjoinSenderStatus, Option<Sender>)> {
+        session_id: &SessionId,
+    ) -> Option<SessionWrapper<SenderSessionEvent>> {
         db_query(
             &mut self.conn,
-            "SELECT bip21, txid, status, sender FROM payjoin_senders",
+            "SELECT session FROM payjoin_senders WHERE session_id = ?1",
+            rusqlite::params![session_id.0],
+            |row| {
+                let session_ser: Vec<u8> = row.get(0)?;
+                let session: SessionWrapper<SenderSessionEvent> =
+                    serde_json::from_slice(&session_ser).unwrap();
+                Ok(session)
+            },
+        )
+        .expect("Db must not fail")
+        .pop()
+    }
+
+    pub fn payjoin_get_all_sender_sessions(
+        &mut self,
+    ) -> Vec<(SessionId, SessionWrapper<SenderSessionEvent>)> {
+        db_query(
+            &mut self.conn,
+            "SELECT session_id, session FROM payjoin_senders",
             rusqlite::params![],
             |row| {
-                let bip21: String = row.get(0)?;
-                let spend_tx_id: Vec<u8> = row.get(1)?;
-                let txid: bitcoin::Txid =
-                    encode::deserialize(&spend_tx_id).expect("We only store valid txids");
-                let status: i32 = row.get(2)?;
-                let sender_json: String = row.get(3)?;
-                let maybe_sender: Option<Sender> = if !sender_json.is_empty() {
-                    Some(serde_json::from_str(&sender_json).unwrap())
-                } else {
-                    None
-                };
-                Ok((bip21, txid, PayjoinSenderStatus::from(status), maybe_sender))
+                let id: u64 = row.get(0)?;
+                let session_id = SessionId::new(id);
+                let session_ser: Vec<u8> = row.get(1)?;
+                let session: SessionWrapper<SenderSessionEvent> =
+                    serde_json::from_slice(&session_ser).unwrap();
+                Ok((session_id, session))
             },
         )
         .expect("Db must not fail")
@@ -1088,32 +1114,18 @@ impl SqliteConn {
 
     pub fn update_payjoin_sender_status(
         &mut self,
-        txid: bitcoin::Txid,
-        status: PayjoinSenderStatus,
-        maybe_sender: Option<Sender>,
-        maybe_new_txid: Option<bitcoin::Txid>,
+        session_id: &SessionId,
+        session: SessionWrapper<SenderSessionEvent>,
     ) {
-        if let Some(sender) = maybe_sender {
-            let sender_json = serde_json::to_string(&sender).unwrap();
-            db_exec(&mut self.conn, |db_tx| {
-                db_tx.execute(
-                    "UPDATE payjoin_senders SET status = ?1, sender = ?2 WHERE txid = ?3",
-                    rusqlite::params![status as i32, sender_json, txid[..].to_vec()],
-                )?;
-                Ok(())
-            })
-            .expect("Db must not fail");
-        } else {
-            let new_txid = maybe_new_txid.unwrap();
-            db_exec(&mut self.conn, |db_tx| {
-                db_tx.execute(
-                    "UPDATE payjoin_senders SET status = ?1, sender = ?2, txid = ?3 WHERE txid = ?4",
-                    rusqlite::params![status as i32, String::new(), new_txid[..].to_vec(), txid[..].to_vec()],
-                )?;
-                Ok(())
-            })
-            .expect("Db must not fail");
-        }
+        let session_ser = serde_json::to_vec(&session).unwrap();
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "UPDATE payjoin_senders SET session = ?1 WHERE session_id = ?2",
+                rusqlite::params![session_ser, session_id.0],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
     }
 }
 

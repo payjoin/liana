@@ -14,7 +14,7 @@ pub use lianad::commands::{
     CreateSpendResult, GetAddressResult, GetInfoResult, GetLabelsResult, LabelItem, ListCoinsEntry,
     ListCoinsResult, ListSpendEntry, ListSpendResult, ListTransactionsResult, TransactionInfo,
 };
-use lianad::payjoin::types::{PayjoinInfo, PayjoinSenderStatus};
+use lianad::payjoin::types::{PayjoinInfo, PayjoinStatus};
 
 pub type Coin = ListCoinsEntry;
 
@@ -211,7 +211,7 @@ impl SpendTx {
         // TODO(arturgontijo): We should count the sigs, just in case.
         if let Some(payjoin_info) = &self.payjoin_info {
             match payjoin_info.sender_status {
-                Some(PayjoinSenderStatus::Completed) => {
+                Some(PayjoinStatus::Completed) => {
                     let has_sigs = self
                         .psbt
                         .inputs

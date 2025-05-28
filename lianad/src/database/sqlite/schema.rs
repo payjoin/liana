@@ -126,20 +126,15 @@ CREATE TABLE labels (
 /* Payjoin senders */
 CREATE TABLE payjoin_senders (
     id INTEGER PRIMARY KEY NOT NULL,
-    bip21 TEXT NOT NULL,
-    txid BLOB UNIQUE NOT NULL,
-    status INTEGER NOT NULL CHECK (status IN (0,1,2,3)),
-    sender TEXT NOT NULL
+    session_id INTEGER NOT NULL,
+    session BLOB NOT NULL
 );
 
 /* Payjoin receivers */
 CREATE TABLE payjoin_receivers (
     id INTEGER PRIMARY KEY NOT NULL,
-    address TEXT UNIQUE NOT NULL,
-    txid BLOB,
-    status INTEGER NOT NULL CHECK (status IN (0,1,2,3)),
-    receiver TEXT NOT NULL,
-    psbt TEXT NOT NULL
+    session_id INTEGER NOT NULL,
+    session BLOB NOT NULL
 );
 ";
 
