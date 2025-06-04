@@ -7,8 +7,8 @@ use std::{
 use liana::descriptors;
 
 use payjoin::{
-    bitcoin::{psbt::Input, secp256k1, FeeRate, OutPoint, Psbt, Sequence, TxIn},
-    persist::{NoopPersister, PersistedError, PersistedSucccessWithMaybeNoResults},
+    bitcoin::{psbt::Input, secp256k1, FeeRate, OutPoint, Sequence, TxIn},
+    persist::OptionalTransitionOutcome,
     receive::{
         v2::{
             replay_receiver_event_log, Receiver, ReceiverSessionEvent, ReceiverState,
@@ -20,11 +20,14 @@ use payjoin::{
 
 use crate::{
     database::{Coin, CoinStatus, DatabaseConnection, DatabaseInterface},
-    payjoin::helpers::{finalize_psbt, post_request, OHTTP_RELAY},
+    payjoin::{
+        db::SessionMetadata,
+        helpers::{finalize_psbt, post_request, OHTTP_RELAY},
+    },
 };
 
 use super::{
-    db::{ReceiverPersister, SessionId, SessionWrapper},
+    db::{ReceiverPersister, SessionWrapper},
     types::PayjoinStatus,
 };
 
@@ -34,9 +37,7 @@ fn handle_directory_proposal(
     db_conn: &mut Box<dyn DatabaseConnection>,
     descs: &[descriptors::SinglePathLianaDesc],
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
-) -> Result<Psbt, Box<dyn Error>> {
-    // descs must always have 2 descriptors
-    assert_eq!(descs.len(), 2);
+) -> Result<(), Box<dyn Error>> {
     let coins = db_conn.coins(&[CoinStatus::Confirmed], &[]);
 
     let mut candidate_inputs_map = HashMap::<OutPoint, (Coin, TxIn, Input)>::new();
@@ -48,7 +49,11 @@ fn handle_directory_proposal(
 
         let txout = tx.tx_out(outpoint.vout as usize)?.clone();
 
-        let receiver_derived_desc = descs[0].derive(coin.derivation_index, secp);
+        let receiver_derived_desc = if coin.is_change {
+            descs[1].derive(coin.derivation_index, secp)
+        } else {
+            descs[0].derive(coin.derivation_index, secp)
+        };
 
         let txin = TxIn {
             previous_output: outpoint.clone(),
@@ -99,37 +104,13 @@ fn handle_directory_proposal(
 
     let selected_input = proposal.try_preserving_privacy(candidate_inputs)?;
 
-    let proposal = proposal
+    proposal
         .contribute_inputs(vec![selected_input])
         .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
         .commit_inputs()
         .save(persister)?;
 
-    // Extract
-    let proposal = proposal.finalize_proposal(
-        |psbt: &Psbt| Ok(psbt.clone()),
-        Some(FeeRate::BROADCAST_MIN),
-        Some(FeeRate::from_sat_per_vb_unchecked(2)),
-    );
-
-    // TODO(arturgontijo): Avoiding changing state, for now
-    let noop_persister = NoopPersister::default();
-    let payjoin_proposal = proposal.save(&noop_persister)?;
-
-    let mut psbt = payjoin_proposal.psbt().clone();
-
-    // TODO(arturgontijo): If we use a previous payjoin utxo it is breaking while broadcasting
-    for (index, psbtin) in psbt.inputs.iter_mut().enumerate() {
-        let outpoint = &psbt.unsigned_tx.input[index].previous_output;
-        if let Some((coin, txin, input)) = candidate_inputs_map.get(outpoint) {
-            *psbtin = input.clone();
-            psbt.unsigned_tx.input[index] = txin.clone();
-            let receiver_derived_desc = descs[0].derive(coin.derivation_index, secp);
-            receiver_derived_desc.update_psbt_in(psbtin);
-        }
-    }
-
-    Ok(psbt)
+    Ok(())
 }
 
 fn poll_fallback(
@@ -152,16 +133,9 @@ fn poll_fallback(
                 )
                 .save(persister);
             match state_transition {
-                Ok(PersistedSucccessWithMaybeNoResults::Success(next_state)) => Ok(next_state),
-                Ok(PersistedSucccessWithMaybeNoResults::NoResults(_current_state)) => {
-                    Err("NoResults".into())
-                }
-                Err(e) => match e {
-                    PersistedError::BadInitInputs(e)
-                    | PersistedError::Fatal(e)
-                    | PersistedError::Transient(e) => Err(e.into()),
-                    PersistedError::Storage(e) => Err(e.into()),
-                },
+                Ok(OptionalTransitionOutcome::Progress(next_state)) => Ok(next_state),
+                Ok(OptionalTransitionOutcome::Stasis(_current_state)) => Err("NoResults".into()),
+                Err(e) => return Err(e.into()),
             }
         }
         Err(e) => Err(e.into()),
@@ -169,7 +143,6 @@ fn poll_fallback(
 }
 
 fn process_receiver_session(
-    session_id: SessionId,
     session: SessionWrapper<ReceiverSessionEvent>,
     state: ReceiverState,
     persister: ReceiverPersister,
@@ -179,60 +152,32 @@ fn process_receiver_session(
 ) -> Result<(), Box<dyn Error>> {
     match state {
         ReceiverState::WithContext(receiver) => {
-            let bip21 = receiver.pj_uri().to_string();
-            log::info!("[Payjoin] ReceiverState::WithContext: {bip21}");
-            if session.status == PayjoinStatus::Pending {
+            log::info!("[Payjoin] ReceiverState::WithContext");
+            if session.metadata.status == PayjoinStatus::Pending {
                 match poll_fallback(receiver, &persister) {
                     Ok(proposal) => {
-                        let psbt =
-                            handle_directory_proposal(proposal, &persister, db_conn, descs, secp)?;
+                        handle_directory_proposal(proposal, &persister, db_conn, descs, secp)?;
+
+                        let (_, history) = replay_receiver_event_log(persister.clone())
+                            .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))
+                            .unwrap();
+
+                        let psbt = history.psbt_with_contributed_inputs().unwrap();
+                        let bip21 = history.pj_uri().unwrap().to_string();
+
                         db_conn.store_spend(&psbt);
-                        // TODO(arturgontijo): Need to refetch it to get latest events.
-                        if let Some(mut session) = db_conn.payjoin_get_receiver_session(&session_id)
-                        {
-                            session.status = PayjoinStatus::Signing;
-                            session.bip21 = Some(bip21);
-                            session.txid = Some(psbt.unsigned_tx.compute_txid());
-                            session.psbt = Some(psbt);
-                            db_conn.update_payjoin_receiver_status(&session_id, session);
-                        }
-                        log::info!("ReceiverState::WithContext: PSBT in DB...");
+                        log::info!("[Payjoin] ReceiverState::WithContext: PSBT in the DB...");
+
+                        persister.update_metada(
+                            Some(PayjoinStatus::Signing),
+                            Some(psbt.unsigned_tx.compute_txid()),
+                            Some(psbt.clone()),
+                            Some(bip21.clone()),
+                        );
                     }
                     Err(_) => {}
                 }
             }
-            Ok(())
-        }
-        ReceiverState::UncheckedProposal(_proposal) => {
-            log::info!("ReceiverState::UncheckedProposal");
-            Ok(())
-        }
-        ReceiverState::MaybeInputsOwned(_proposal) => {
-            log::info!("ReceiverState::MaybeInputsOwned");
-            Ok(())
-        }
-        ReceiverState::MaybeInputsSeen(_proposal) => {
-            log::info!("ReceiverState::MaybeInputsSeen");
-            Ok(())
-        }
-        ReceiverState::OutputsUnknown(_proposal) => {
-            log::info!("ReceiverState::OutputsUnknown");
-            Ok(())
-        }
-        ReceiverState::WantsOutputs(_proposal) => {
-            log::info!("ReceiverState::WantsOutputs");
-            Ok(())
-        }
-        ReceiverState::WantsInputs(_proposal) => {
-            log::info!("ReceiverState::WantsInputs");
-            Ok(())
-        }
-        ReceiverState::ProvisionalProposal(_proposal) => {
-            log::info!("ReceiverState::ProvisionalProposal");
-            Ok(())
-        }
-        ReceiverState::PayjoinProposal(_proposal) => {
-            log::info!("ReceiverState::PayjoinProposal");
             Ok(())
         }
         _ => return Err(format!("Unexpected receiver state: {:?}", state).into()),
@@ -246,35 +191,43 @@ pub fn payjoin_receiver_check(
 ) {
     let mut db_conn = db.connection();
     for (session_id, session) in db_conn.payjoin_get_all_receiver_sessions() {
-        log::info!("[Payjoin] {:?}: bip21={:?}", session.status, session.bip21);
+        let SessionMetadata {
+            status,
+            maybe_txid,
+            maybe_bip21,
+            ..
+        } = session.metadata.clone();
+
+        // No need to check Completed
+        if status == PayjoinStatus::Completed {
+            continue;
+        }
+
+        log::info!("[Payjoin] {:?}: bip21={:?}", status, maybe_bip21);
+
         let persister =
             ReceiverPersister::from_id(Arc::new(db.clone()), session_id.clone()).unwrap();
+
         let (state, _) = replay_receiver_event_log(persister.clone())
             .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))
             .unwrap();
-        match session.status {
+
+        match status {
             PayjoinStatus::Pending => {
-                match process_receiver_session(
-                    session_id,
-                    session,
-                    state,
-                    persister,
-                    &mut db_conn,
-                    descs,
-                    secp,
-                ) {
+                match process_receiver_session(session, state, persister, &mut db_conn, descs, secp)
+                {
                     Ok(_) => (),
-                    Err(e) => log::warn!("payjoin_receiver_check(): {}", e),
+                    Err(e) => log::warn!("receiver_check(): {}", e),
                 }
             }
             PayjoinStatus::Signing => {
-                if let Some(txid) = session.txid {
+                if let Some(txid) = maybe_txid {
                     match db_conn.spend_tx(&txid) {
                         Some(psbt) => {
                             let mut is_signed = false;
                             for psbtin in &psbt.inputs {
                                 if !psbtin.partial_sigs.is_empty() {
-                                    log::info!("PSBT was signed!");
+                                    log::debug!("[Payjoin] PSBT is signed!");
                                     is_signed = true;
                                     break;
                                 }
@@ -290,7 +243,7 @@ pub fn payjoin_receiver_check(
                                             .finalize_proposal(
                                                 |_| Ok(psbt.clone()),
                                                 None,
-                                                Some(FeeRate::from_sat_per_vb(5).unwrap()),
+                                                Some(FeeRate::from_sat_per_vb(150).unwrap()),
                                             )
                                             .save(&persister)
                                             .unwrap();
@@ -300,11 +253,7 @@ pub fn payjoin_receiver_check(
                                             .expect("Failed to extract request");
 
                                         // Respond to sender
-                                        log::info!("[Payjoin] receiver responding to sender...");
-                                        log::info!(
-                                            "[Payjoin] DEBUG: post_psbt_proposal(): {}",
-                                            req.url
-                                        );
+                                        log::info!("[Payjoin] Receiver responding to sender...");
                                         match post_request(req.clone()) {
                                             Ok(resp) => {
                                                 proposal
@@ -312,15 +261,7 @@ pub fn payjoin_receiver_check(
                                                     .save(&persister)
                                                     .unwrap();
 
-                                                // TODO(arturgontijo): Need to refetch it to get latest events.
-                                                if let Some(mut session) = db_conn.payjoin_get_receiver_session(&session_id) {
-                                                    // Update status of receiver
-                                                    session.status = PayjoinStatus::Completed;
-                                                    db_conn.update_payjoin_receiver_status(
-                                                        &session_id,
-                                                        session,
-                                                    );
-                                                }
+                                                persister.update_metada(Some(PayjoinStatus::Completed), maybe_txid, Some(psbt), maybe_bip21);
                                             },
                                             Err(err) => log::error!(
                                                 "[Payjoin] payjoin_receiver_check(respond_to_sender): {} -> {}",

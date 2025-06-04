@@ -101,7 +101,7 @@ impl<C: Client + Send + Sync + Debug> Daemon for Lianad<C> {
         unimplemented!()
     }
 
-    async fn get_sender_payjoin(&self, _txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError> {
+    async fn get_payjoin_info(&self, _txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError> {
         unimplemented!()
     }
 

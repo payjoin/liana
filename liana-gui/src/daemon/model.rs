@@ -149,14 +149,8 @@ impl SpendTx {
         };
 
         // One input coin is missing, the psbt is deprecated for now.
-        if coins_map.len() != psbt.inputs.len() {
-            // TODO(arturgontijo): Skip for now...
-            log::warn!(
-                "Not deprecating... coins_map.len({}) != psbt.inputs.len({})",
-                coins_map.len(),
-                psbt.inputs.len()
-            );
-            // status = SpendStatus::Deprecated
+        if coins_map.len() != psbt.inputs.len() && payjoin_info.is_none() {
+            status = SpendStatus::Deprecated
         }
 
         let sigs = desc

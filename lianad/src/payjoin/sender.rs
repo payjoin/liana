@@ -1,12 +1,14 @@
 use crate::database::DatabaseInterface;
 
+use crate::payjoin::db::SessionMetadata;
 use crate::payjoin::helpers::post_request;
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{self, Arc};
 
 use payjoin::bitcoin::Psbt;
-use payjoin::persist::PersistedSucccessWithMaybeNoResults;
+use payjoin::persist::OptionalTransitionOutcome;
 use payjoin::send::v2::Sender;
 use payjoin::send::v2::{replay_sender_event_log, SenderState, SenderWithReplyKey, V2GetContext};
 
@@ -19,7 +21,6 @@ fn get_proposed_payjoin_psbt(
     persister: &SenderPersister,
 ) -> Result<Option<Psbt>, Box<dyn Error>> {
     let (req, ctx) = context.extract_req(OHTTP_RELAY)?;
-    log::info!("[Payjoin] DEBUG: get_proposed_payjoin_psbt(): {}", req.url);
     match post_request(req) {
         Ok(resp) => {
             let res = context
@@ -29,14 +30,12 @@ fn get_proposed_payjoin_psbt(
                 )
                 .save(persister);
             match res {
-                Ok(PersistedSucccessWithMaybeNoResults::Success(proposal)) => {
-                    let psbt = proposal.psbt();
-                    log::info!("[Payjoin] Proposal received. PSBT: {}", psbt.to_string());
-                    Ok(Some(psbt.clone()))
+                Ok(OptionalTransitionOutcome::Progress(proposal)) => {
+                    log::info!("[Payjoin] ProposalReceived!");
+                    Ok(Some(proposal.psbt().clone()))
                 }
-                Ok(PersistedSucccessWithMaybeNoResults::NoResults(_current_state)) => {
+                Ok(OptionalTransitionOutcome::Stasis(_current_state)) => {
                     log::info!("[Payjoin] No response yet.");
-                    // context = current_state;
                     Ok(None)
                 }
                 Err(e) => {
@@ -54,7 +53,6 @@ fn post_orginal_proposal(
     persister: &SenderPersister,
 ) -> Result<(), Box<dyn Error>> {
     let (req, ctx) = sender.extract_v2(OHTTP_RELAY)?;
-    log::info!("[Payjoin] DEBUG: post_orginal_proposal(): {}", req.url);
     match post_request(req) {
         Ok(resp) => {
             log::info!("[Payjoin] Posted original proposal...");
@@ -76,7 +74,7 @@ fn process_sender_session(
 ) -> Result<Option<Psbt>, Box<dyn Error>> {
     match state {
         SenderState::WithReplyKey(sender) => {
-            log::info!("[Payjoin] SenderState::WithReplyKe");
+            log::info!("[Payjoin] SenderState::WithReplyKey");
             match post_orginal_proposal(sender, persister) {
                 Ok(_) => {}
                 Err(err) => log::warn!("post_orginal_proposal(): {}", err),
@@ -88,11 +86,12 @@ fn process_sender_session(
             get_proposed_payjoin_psbt(context, persister)
         }
         SenderState::ProposalReceived(proposal) => {
+            let psbt = proposal.psbt();
             log::info!(
                 "[Payjoin] SenderState::ProposalReceived: {}",
-                proposal.psbt().to_string()
+                psbt.to_string()
             );
-            return Ok(None);
+            return Ok(Some(psbt.clone()));
         }
         _ => return Err(format!("Unexpected sender state").into()),
     }
@@ -101,39 +100,77 @@ fn process_sender_session(
 pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) {
     let mut db_conn = db.connection();
     for (session_id, session) in db_conn.payjoin_get_all_sender_sessions() {
-        log::info!("[Payjoin] {:?}: bip21={:?}", session.status, session.bip21);
+        let SessionMetadata {
+            status,
+            maybe_txid,
+            maybe_psbt,
+            maybe_bip21,
+        } = session.metadata.clone();
+
+        // No need to check Completed
+        if status == PayjoinStatus::Completed {
+            continue;
+        }
+
+        log::info!("[Payjoin] {:?}: bip21={:?}", status, maybe_bip21);
+
         let persister = SenderPersister::from_id(Arc::new(db.clone()), session_id.clone()).unwrap();
+
         let (state, _) = replay_sender_event_log(persister.clone())
             .map_err(|e| format!("Failed to replay sender event log: {:?}", e))
             .unwrap();
-        match session.status {
+
+        match status {
             PayjoinStatus::Pending => match process_sender_session(state, &persister) {
-                Ok(_) => {
-                    if let Some(mut session) = db_conn.payjoin_get_sender_session(&session_id) {
-                        session.status = PayjoinStatus::WaitingReceiver;
-                        db_conn.update_payjoin_sender_status(&session_id, session);
-                    }
-                }
+                Ok(_) => persister.update_metada(
+                    Some(PayjoinStatus::WaitingReceiver),
+                    maybe_txid,
+                    maybe_psbt,
+                    maybe_bip21,
+                ),
                 Err(e) => log::warn!("process_sender_session(): {}", e),
             },
             PayjoinStatus::WaitingReceiver => match process_sender_session(state, &persister) {
                 Ok(maybe_psbt) => {
-                    if let Some(new_psbt) = maybe_psbt {
-                        if let Some(txid) = session.txid {
-                            if let Some(mut session) =
-                                db_conn.payjoin_get_sender_session(&session_id)
-                            {
-                                log::info!("Deleting original Payjoin psbt (txid={txid})");
+                    if let Some(mut new_psbt) = maybe_psbt {
+                        if let Some(txid) = maybe_txid {
+                            if let Some(psbt) = db_conn.spend_tx(&txid) {
+                                // TODO(arturgontijo): PDK removes fields that we need in the GUI to properly sign the inputs
+                                let mut input_fields_to_restore = HashMap::new();
+                                for (index, txin) in psbt.unsigned_tx.input.iter().enumerate() {
+                                    let mut input_without_sigs = psbt.inputs[index].clone();
+                                    input_without_sigs.partial_sigs = Default::default();
+                                    input_fields_to_restore
+                                        .insert(txin.previous_output.clone(), input_without_sigs);
+                                }
+                                log::info!(
+                                    "[Payjoin] Deleting original Payjoin psbt (txid={txid})"
+                                );
                                 db_conn.delete_spend(&txid);
 
+                                // TODO(arturgontijo): Restoring witness_scripts and bip32_derivation so GUI can sign them
+                                for (index, psbtin) in new_psbt.inputs.iter_mut().enumerate() {
+                                    let outpoint =
+                                        &new_psbt.unsigned_tx.input[index].previous_output;
+                                    if let Some(input) = input_fields_to_restore.get(outpoint) {
+                                        *psbtin = input.clone();
+                                    }
+                                }
+
                                 let new_txid = new_psbt.unsigned_tx.compute_txid();
-                                log::info!("Updating Payjoin psbt: {} -> {}", txid, new_txid,);
+                                log::info!(
+                                    "[Payjoin] Updating Payjoin psbt: {} -> {}",
+                                    txid,
+                                    new_txid,
+                                );
                                 db_conn.store_spend(&new_psbt);
 
-                                session.txid = Some(new_txid);
-                                session.psbt = Some(new_psbt);
-                                session.status = PayjoinStatus::Completed;
-                                db_conn.update_payjoin_sender_status(&session_id, session);
+                                persister.update_metada(
+                                    Some(PayjoinStatus::Completed),
+                                    Some(new_txid),
+                                    Some(new_psbt),
+                                    maybe_bip21,
+                                );
                             }
                         }
                     }

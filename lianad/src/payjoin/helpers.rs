@@ -19,7 +19,7 @@ pub fn post_request(req: payjoin::Request) -> Result<reqwest::blocking::Response
         .post(req.url)
         .header("Content-Type", req.content_type)
         .body(req.body)
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
         .send()
     {
         Ok(r) => Ok(r),
@@ -51,8 +51,8 @@ pub fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::Ver
 
     for index in inputs_to_finalize {
         match psbt.finalize_inp_mut(&secp, index) {
-            Ok(_) => log::info!("Finalizing input at: {}", index),
-            Err(e) => log::warn!("Failed to finalize input at: {} | {}", index, e),
+            Ok(_) => log::info!("[Payjoin] Finalizing input at: {}", index),
+            Err(e) => log::warn!("[Payjoin] Failed to finalize input at: {} | {}", index, e),
         }
     }
 

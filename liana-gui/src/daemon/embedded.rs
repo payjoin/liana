@@ -123,10 +123,10 @@ impl Daemon for EmbeddedDaemon {
         .await
     }
 
-    async fn get_sender_payjoin(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError> {
+    async fn get_payjoin_info(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError> {
         self.command(|daemon| {
             daemon
-                .get_sender_payjoin(txid)
+                .get_payjoin_info(txid)
                 .map_err(|e| DaemonError::Unexpected(e.to_string()))
         })
         .await

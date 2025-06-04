@@ -112,7 +112,7 @@ pub trait Daemon: Debug {
         ohttp_keys: OhttpKeys,
     ) -> Result<model::GetAddressResult, DaemonError>;
     async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError>;
-    async fn get_sender_payjoin(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError>;
+    async fn get_payjoin_info(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError>;
     async fn update_deriv_indexes(
         &self,
         receive: Option<u32>,
@@ -208,7 +208,7 @@ pub trait Daemon: Debug {
                 .collect();
 
             let payjoin_info = self
-                .get_sender_payjoin(&tx.psbt.unsigned_tx.compute_txid())
+                .get_payjoin_info(&tx.psbt.unsigned_tx.compute_txid())
                 .await?;
 
             spend_txs.push(model::SpendTx::new(

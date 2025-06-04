@@ -561,7 +561,7 @@ impl DatabaseConnection for DummyDatabase {
         todo!()
     }
 
-    fn payjoin_next_id(&mut self) -> u64 {
+    fn payjoin_next_id(&mut self, _table: &str) -> u64 {
         todo!()
     }
 

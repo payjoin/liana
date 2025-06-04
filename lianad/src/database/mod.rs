@@ -200,7 +200,7 @@ pub trait DatabaseConnection {
     /// Payjoin
 
     /// Get the next Session Id
-    fn payjoin_next_id(&mut self) -> u64;
+    fn payjoin_next_id(&mut self, table: &str) -> u64;
 
     /// Save Receiver Session
     fn payjoin_save_receiver_session(
@@ -475,8 +475,8 @@ impl DatabaseConnection for SqliteConn {
             .collect()
     }
 
-    fn payjoin_next_id(&mut self) -> u64 {
-        self.payjoin_next_id()
+    fn payjoin_next_id(&mut self, table: &str) -> u64 {
+        self.payjoin_next_id(table)
     }
 
     fn payjoin_save_receiver_session(

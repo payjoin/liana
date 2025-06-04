@@ -18,10 +18,7 @@ use liana::{
     },
     spend::{SpendCreationError, MAX_FEERATE},
 };
-use lianad::{
-    commands::ListCoinsEntry,
-    payjoin::types::{PayjoinInfo, PayjoinStatus},
-};
+use lianad::{commands::ListCoinsEntry, payjoin::types::PayjoinInfo};
 
 use liana_ui::{component::form, widget::Element};
 use payjoin::Uri;
@@ -976,8 +973,8 @@ impl Step for SaveSpend {
         } else {
             Some(PayjoinInfo {
                 bip21,
-                sender_status: Some(PayjoinStatus::Pending),
-                receiver_status: Some(PayjoinStatus::Pending),
+                sender_status: None,
+                receiver_status: None,
             })
         };
 

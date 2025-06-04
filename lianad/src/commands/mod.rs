@@ -9,8 +9,8 @@ use crate::{
     database::{Coin, DatabaseConnection, DatabaseInterface},
     miniscript::bitcoin::absolute::LockTime,
     payjoin::{
-        db::{ReceiverPersister, SenderPersister},
-        types::PayjoinInfo,
+        db::{ReceiverPersister, SenderPersister, SessionMetadata},
+        types::{PayjoinInfo, PayjoinStatus},
     },
     poller::PollerMessage,
     DaemonControl, VERSION,
@@ -48,7 +48,7 @@ use miniscript::{
     psbt::PsbtExt,
 };
 use payjoin::{
-    bitcoin::{FeeRate, Txid},
+    bitcoin::{key::Secp256k1, FeeRate, Txid},
     receive::v2::{Receiver, UninitializedReceiver},
     send::v2::SenderBuilder,
     OhttpKeys, Uri, UriExt, Url,
@@ -414,34 +414,37 @@ impl DaemonControl {
             .map_err(|_| format!("URI does not support Payjoin"))
             .unwrap();
 
+        let mut psbt = psbt.clone();
+        psbt.finalize_mut(&Secp256k1::verification_only()).unwrap();
+
         let persister = SenderPersister::new(Arc::new(self.db.clone())).unwrap();
         let _sender = SenderBuilder::new(psbt.clone(), uri)
             .build_recommended(FeeRate::BROADCAST_MIN)
             .save(&persister)
             .unwrap();
 
-        let session_id = persister.session_id;
-        if let Some(mut session) = self.db.connection().payjoin_get_sender_session(&session_id) {
-            session.bip21 = Some(bip21);
-            session.psbt = Some(psbt.clone());
-            session.txid = Some(psbt.unsigned_tx.compute_txid());
-            self.db
-                .connection()
-                .update_payjoin_sender_status(&session_id, session);
-        }
+        persister.update_metada(
+            Some(PayjoinStatus::Pending),
+            Some(psbt.unsigned_tx.compute_txid()),
+            Some(psbt.clone()),
+            Some(bip21.clone()),
+        );
 
         Ok(())
     }
 
     /// Get Payjoin URI (BIP21) and its sender/receiver status by txid
-    pub fn get_sender_payjoin(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, CommandError> {
+    pub fn get_payjoin_info(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, CommandError> {
         let mut db_conn = self.db.connection();
 
         let mut receiver_status = None;
         for (_, session) in db_conn.payjoin_get_all_receiver_sessions() {
-            if let Some(db_txid) = session.txid {
+            let SessionMetadata {
+                status, maybe_txid, ..
+            } = session.metadata.clone();
+            if let Some(db_txid) = maybe_txid {
                 if &db_txid == txid {
-                    receiver_status = Some(session.status);
+                    receiver_status = Some(status);
                     break;
                 }
             }
@@ -450,10 +453,16 @@ impl DaemonControl {
         let mut bip21 = String::new();
         let mut sender_status = None;
         for (_, session) in db_conn.payjoin_get_all_sender_sessions() {
-            if let Some(db_txid) = session.txid {
+            let SessionMetadata {
+                status,
+                maybe_txid,
+                maybe_bip21,
+                ..
+            } = session.metadata.clone();
+            if let Some(db_txid) = maybe_txid {
                 if &db_txid == txid {
-                    sender_status = Some(session.status);
-                    bip21 = session.bip21.unwrap_or_default();
+                    sender_status = Some(status);
+                    bip21 = maybe_bip21.unwrap_or_default();
                     break;
                 }
             }

@@ -967,10 +967,10 @@ impl SqliteConn {
     }
 
     /// Create a payjoin receiver
-    pub fn payjoin_next_id(&mut self) -> u64 {
+    pub fn payjoin_next_id(&mut self, table: &str) -> u64 {
         let count = db_query(
             &mut self.conn,
-            "SELECT COUNT(*) FROM payjoin_receivers",
+            &format!("SELECT COUNT(*) FROM {}", table),
             rusqlite::params![],
             |row| {
                 let count: u64 = row.get(0)?;
