@@ -218,6 +218,13 @@ impl Step for DefineDescriptor {
                 self.modal = Some(Box::new(modal));
                 return cmd;
             }
+            Message::DefineDescriptor(message::DefineDescriptor::Reset) => {
+                hws.aliases.clear();
+                self.keys.clear();
+                self.paths.clear();
+                self.load_template(self.descriptor_template);
+                self.modal = None;
+            }
             Message::DefineDescriptor(message::DefineDescriptor::Path(i, msg)) => {
                 match msg {
                     message::DefinePath::SequenceEdited(seq) => {
@@ -764,6 +771,7 @@ mod tests {
             fingerprint: key.master_fingerprint(),
             key,
             source: KeySource::Device(async_hwi::DeviceKind::Specter, None),
+            account: None,
         };
 
         // Use Specter device for primary key

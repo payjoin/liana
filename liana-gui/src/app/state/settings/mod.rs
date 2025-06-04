@@ -9,7 +9,7 @@ use iced::Task;
 use liana_ui::{component::form, widget::Element};
 
 use bitcoind::BitcoindSettingsState;
-use wallet::WalletSettingsState;
+use wallet::{update_aliases, WalletSettingsState};
 
 use crate::{
     app::{
@@ -223,7 +223,19 @@ impl State for ImportExportSettingsState {
                 self.modal = None;
             }
             Message::View(view::Message::ImportExport(m)) => {
-                if let Some(modal) = self.modal.as_mut() {
+                if let ImportExportMessage::UpdateAliases(aliases) = m {
+                    return Task::perform(
+                        update_aliases(
+                            cache.datadir_path.clone(),
+                            cache.network,
+                            self.wallet.clone(),
+                            None,
+                            aliases.into_iter().map(|(fg, ks)| (fg, ks.name)).collect(),
+                            daemon,
+                        ),
+                        Message::WalletUpdated,
+                    );
+                } else if let Some(modal) = self.modal.as_mut() {
                     return modal.update(m);
                 };
             }
@@ -269,8 +281,15 @@ impl State for ImportExportSettingsState {
             }
             Message::View(view::Message::Settings(view::SettingsMessage::ImportWallet)) => {
                 if self.modal.is_none() {
-                    let modal =
-                        ExportModal::new(Some(daemon), ImportExportType::ImportBackup(None, None));
+                    let modal = ExportModal::new(
+                        Some(daemon),
+                        ImportExportType::ImportBackup {
+                            network_dir: cache.datadir_path.network_directory(cache.network),
+                            wallet: self.wallet.clone(),
+                            overwrite_labels: None,
+                            overwrite_aliases: None,
+                        },
+                    );
                     launch!(self, modal, false);
                 }
             }

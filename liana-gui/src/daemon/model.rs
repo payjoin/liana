@@ -12,7 +12,8 @@ pub use liana::{
 };
 pub use lianad::commands::{
     CreateSpendResult, GetAddressResult, GetInfoResult, GetLabelsResult, LabelItem, ListCoinsEntry,
-    ListCoinsResult, ListSpendEntry, ListSpendResult, ListTransactionsResult, TransactionInfo,
+    ListCoinsResult, ListRevealedAddressesEntry, ListRevealedAddressesResult, ListSpendEntry,
+    ListSpendResult, ListTransactionsResult, TransactionInfo,
 };
 use lianad::payjoin::types::{PayjoinInfo, PayjoinStatus};
 
@@ -227,6 +228,10 @@ impl SpendTx {
             .recovery_paths()
             .values()
             .find(|&path| path.sigs_count >= path.threshold)
+    }
+
+    pub fn recovery_timelock(&self) -> Option<u16> {
+        self.sigs.recovery_paths().keys().max().cloned()
     }
 
     pub fn signers(&self) -> HashSet<Fingerprint> {

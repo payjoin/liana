@@ -9,7 +9,9 @@ use async_trait::async_trait;
 use chrono::Utc;
 use liana::{
     descriptors::LianaDescriptor,
-    miniscript::bitcoin::{address, psbt::Psbt, Address, Network, OutPoint, Txid},
+    miniscript::bitcoin::{
+        address, bip32::ChildNumber, psbt::Psbt, Address, Network, OutPoint, Txid,
+    },
 };
 use lianad::{
     bip329::Labels,
@@ -183,6 +185,7 @@ impl BackendClient {
     pub async fn update_wallet_metadata(
         &self,
         wallet_uuid: &str,
+        wallet_alias: Option<String>,
         fingerprint_aliases: &HashMap<Fingerprint, String>,
         hws: &[HardwareWalletConfig],
     ) -> Result<(), DaemonError> {
@@ -211,6 +214,7 @@ impl BackendClient {
                     )
                     .await
                     .json(&api::payload::UpdateWallet {
+                        alias: None,
                         ledger_hmac: Some(api::payload::UpdateLedgerHmac {
                             fingerprint: cfg.fingerprint.to_string(),
                             hmac: cfg.token.clone(),
@@ -229,16 +233,31 @@ impl BackendClient {
             }
         }
 
-        if fingerprint_aliases.iter().any(|(fg, alias)| {
-            !wallet
-                .metadata
-                .fingerprint_aliases
-                .contains(&api::FingerprintAlias {
-                    alias: alias.to_string(),
-                    user_id: self.user_id.clone(),
-                    fingerprint: *fg,
-                })
-        }) {
+        let fingerprint_aliases: Option<Vec<api::payload::UpdateFingerprintAlias>> =
+            if fingerprint_aliases.iter().any(|(fg, alias)| {
+                !wallet
+                    .metadata
+                    .fingerprint_aliases
+                    .contains(&api::FingerprintAlias {
+                        alias: alias.to_string(),
+                        user_id: self.user_id.clone(),
+                        fingerprint: *fg,
+                    })
+            }) {
+                Some(
+                    fingerprint_aliases
+                        .iter()
+                        .map(|(fg, alias)| api::payload::UpdateFingerprintAlias {
+                            fingerprint: fg.to_string(),
+                            alias: alias.to_string(),
+                        })
+                        .collect(),
+                )
+            } else {
+                None
+            };
+
+        if fingerprint_aliases.is_some() || wallet_alias.is_some() {
             let response: Response = self
                 .request(
                     Method::PATCH,
@@ -246,16 +265,9 @@ impl BackendClient {
                 )
                 .await
                 .json(&api::payload::UpdateWallet {
+                    alias: wallet_alias,
                     ledger_hmac: None,
-                    fingerprint_aliases: Some(
-                        fingerprint_aliases
-                            .iter()
-                            .map(|(fg, alias)| api::payload::UpdateFingerprintAlias {
-                                fingerprint: fg.to_string(),
-                                alias: alias.to_string(),
-                            })
-                            .collect(),
-                    ),
+                    fingerprint_aliases,
                 })
                 .send()
                 .await?;
@@ -342,7 +354,7 @@ impl BackendWalletClient {
         self.inner.user_email()
     }
 
-    async fn get_wallet(&self) -> Result<api::Wallet, DaemonError> {
+    pub async fn get_wallet(&self) -> Result<api::Wallet, DaemonError> {
         let list = self.inner.list_wallets().await?;
         let wallet = list
             .into_iter()
@@ -627,6 +639,57 @@ impl Daemon for BackendWalletClient {
 
     async fn get_payjoin_info(&self, _txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError> {
         unimplemented!()
+    }
+
+    async fn list_revealed_addresses(
+        &self,
+        is_change: bool,
+        exclude_used: bool,
+        limit: usize,
+        start_index: Option<ChildNumber>,
+    ) -> Result<ListRevealedAddressesResult, DaemonError> {
+        let mut query = Vec::<(&str, String)>::new();
+        query.push(("is_change_address", is_change.to_string()));
+        query.push(("exclude_used", exclude_used.to_string()));
+        query.push(("limit", limit.to_string()));
+        if let Some(start) = start_index {
+            query.push(("start_derivation_index", start.to_string()));
+        }
+        let response: Response = self
+            .inner
+            .request(
+                Method::GET,
+                &format!(
+                    "{}/v1/wallets/{}/addresses",
+                    self.inner.url, self.wallet_uuid
+                ),
+            )
+            .await
+            .query(&query)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(DaemonError::Http(
+                Some(response.status().into()),
+                response.text().await?,
+            ));
+        }
+
+        let res: api::ListRevealedAddresses = response.json().await?;
+        Ok(ListRevealedAddressesResult {
+            addresses: res
+                .addresses
+                .into_iter()
+                .map(|addr| ListRevealedAddressesEntry {
+                    index: addr.derivation_index,
+                    address: addr.address,
+                    label: addr.label,
+                    used_count: addr.used_count,
+                })
+                .collect(),
+            continue_from: res.continue_from,
+        })
     }
 
     async fn update_deriv_indexes(
@@ -1099,11 +1162,12 @@ impl Daemon for BackendWalletClient {
     /// Implemented by LianaLite backend
     async fn update_wallet_metadata(
         &self,
+        wallet_alias: Option<String>,
         fingerprint_aliases: &HashMap<Fingerprint, String>,
         hws: &[HardwareWalletConfig],
     ) -> Result<(), DaemonError> {
         self.inner
-            .update_wallet_metadata(&self.wallet_uuid, fingerprint_aliases, hws)
+            .update_wallet_metadata(&self.wallet_uuid, wallet_alias, fingerprint_aliases, hws)
             .await
     }
 
@@ -1252,8 +1316,6 @@ fn spend_tx_from_api(
         desc,
         secp,
         network,
-        // TODO: BIP21 loaded from the backend will always be ignored
-        None,
     );
     tx.load_labels(&labels);
     tx

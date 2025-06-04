@@ -139,10 +139,13 @@ pub struct ProviderKey {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalletMetadata {
+    pub wallet_alias: Option<String>,
     pub ledger_hmacs: Vec<LedgerHmac>,
     pub fingerprint_aliases: Vec<FingerprintAlias>,
     pub provider_keys: Vec<ProviderKey>,
 }
+
+pub const WALLET_ALIAS_MAXIMUM_LENGTH: usize = 64;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LedgerHmac {
@@ -347,6 +350,21 @@ pub struct Address {
     pub derivation_index: bip32::ChildNumber,
 }
 
+#[derive(Deserialize)]
+pub struct RevealedAddress {
+    #[serde(deserialize_with = "deser_addr_assume_checked")]
+    pub address: bitcoin::Address,
+    pub derivation_index: bip32::ChildNumber,
+    pub label: Option<String>,
+    pub used_count: u32,
+}
+
+#[derive(Deserialize)]
+pub struct ListRevealedAddresses {
+    pub addresses: Vec<RevealedAddress>,
+    pub continue_from: Option<bip32::ChildNumber>,
+}
+
 pub mod payload {
     use liana::{descriptors::LianaDescriptor, miniscript::bitcoin};
     use serde::{Serialize, Serializer};
@@ -473,6 +491,7 @@ pub mod payload {
 
     #[derive(Serialize)]
     pub struct UpdateWallet {
+        pub alias: Option<String>,
         pub ledger_hmac: Option<UpdateLedgerHmac>,
         pub fingerprint_aliases: Option<Vec<UpdateFingerprintAlias>>,
     }

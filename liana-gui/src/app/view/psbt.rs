@@ -5,6 +5,7 @@ use iced::{
     Alignment, Length,
 };
 
+use liana::descriptors::LianaDescriptor;
 use liana::{
     descriptors::{LianaPolicy, PathInfo, PathSpendInfo},
     miniscript::bitcoin::{
@@ -45,6 +46,7 @@ pub fn psbt_view<'a>(
     key_aliases: &'a HashMap<Fingerprint, String>,
     labels_editing: &'a HashMap<String, form::Value<String>>,
     network: Network,
+    currently_signing: bool,
     warning: Option<&Error>,
 ) -> Element<'a, Message> {
     dashboard(
@@ -71,7 +73,12 @@ pub fn psbt_view<'a>(
                     }),
             )
             .push(spend_header(tx, labels_editing))
-            .push(spend_overview_view(tx, desc_info, key_aliases))
+            .push(spend_overview_view(
+                tx,
+                desc_info,
+                key_aliases,
+                currently_signing,
+            ))
             .push(
                 Column::new()
                     .spacing(20)
@@ -95,7 +102,11 @@ pub fn psbt_view<'a>(
                     .push(
                         button::secondary(None, "Delete")
                             .width(Length::Fixed(200.0))
-                            .on_press(Message::Spend(SpendTxMessage::Delete)),
+                            .on_press_maybe(if currently_signing {
+                                None
+                            } else {
+                                Some(Message::Spend(SpendTxMessage::Delete))
+                            }),
                     )
                     .width(Length::Fill)
             } else {
@@ -104,7 +115,11 @@ pub fn psbt_view<'a>(
                     .push(
                         button::secondary(None, "Save")
                             .width(Length::Fixed(150.0))
-                            .on_press(Message::Spend(SpendTxMessage::Save)),
+                            .on_press_maybe(if currently_signing {
+                                None
+                            } else {
+                                Some(Message::Spend(SpendTxMessage::Save))
+                            }),
                     )
                     .width(Length::Fill)
             })
@@ -324,6 +339,7 @@ pub fn spend_overview_view<'a>(
     tx: &'a SpendTx,
     desc_info: &'a LianaPolicy,
     key_aliases: &'a HashMap<Fingerprint, String>,
+    currently_signing: bool,
 ) -> Element<'a, Message> {
     Column::new()
         .spacing(20)
@@ -346,14 +362,22 @@ pub fn spend_overview_view<'a>(
                                                     Some(icon::backup_icon()),
                                                     "Export",
                                                 )
-                                                .on_press(Message::ExportPsbt),
+                                                .on_press_maybe(if currently_signing {
+                                                    None
+                                                } else {
+                                                    Some(Message::ExportPsbt)
+                                                }),
                                             )
                                             .push(
                                                 button::secondary(
                                                     Some(icon::restore_icon()),
                                                     "Import",
                                                 )
-                                                .on_press(Message::ImportPsbt),
+                                                .on_press_maybe(if currently_signing {
+                                                    None
+                                                } else {
+                                                    Some(Message::ImportPsbt)
+                                                }),
                                             ),
                                     )
                                     .align_y(Alignment::Center),
@@ -1071,13 +1095,16 @@ fn change_view(output: &TxOut, network: Network) -> Element<Message> {
         .into()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn sign_action<'a>(
     warning: Option<&Error>,
     hws: &'a [HardwareWallet],
+    descriptor: &LianaDescriptor,
     signer: Option<Fingerprint>,
     signer_alias: Option<&'a String>,
     signed: &HashSet<Fingerprint>,
     signing: &HashSet<Fingerprint>,
+    recovery_timelock: Option<u16>,
 ) -> Element<'a, Message> {
     Column::new()
         .push_maybe(warning.map(|w| warn(Some(w))))
@@ -1094,29 +1121,37 @@ pub fn sign_action<'a>(
                         .push(hws.iter().enumerate().fold(
                             Column::new().spacing(10),
                             |col, (i, hw)| {
-                                col.push(hw_list_view(
-                                    i,
-                                    hw,
-                                    hw.fingerprint()
-                                        .map(|f| signed.contains(&f))
-                                        .unwrap_or(false),
-                                    hw.fingerprint()
-                                        .map(|f| signing.contains(&f))
-                                        .unwrap_or(false),
-                                ))
+                                let (signed, signing, can_sign) =
+                                    hw.fingerprint().map_or((false, false, false), |f| {
+                                        (
+                                            signed.contains(&f),
+                                            signing.contains(&f),
+                                            descriptor
+                                                .contains_fingerprint_in_path(f, recovery_timelock),
+                                        )
+                                    });
+                                col.push(hw_list_view(i, hw, signed, signing, can_sign))
                             },
                         ))
-                        .push_maybe(signer.map(|fingerprint| {
-                            Button::new(if signed.contains(&fingerprint) {
-                                hw::sign_success_hot_signer(fingerprint, signer_alias)
-                            } else {
-                                hw::hot_signer(fingerprint, signer_alias)
+                        .push_maybe({
+                            signer.map(|fingerprint| {
+                                let can_sign = descriptor
+                                    .contains_fingerprint_in_path(fingerprint, recovery_timelock);
+                                let btn = Button::new(if signed.contains(&fingerprint) {
+                                    hw::sign_success_hot_signer(fingerprint, signer_alias)
+                                } else {
+                                    hw::hot_signer(fingerprint, signer_alias, can_sign)
+                                })
+                                .padding(10)
+                                .style(theme::button::secondary)
+                                .width(Length::Fill);
+                                if can_sign {
+                                    btn.on_press(Message::Spend(SpendTxMessage::SelectHotSigner))
+                                } else {
+                                    btn
+                                }
                             })
-                            .on_press(Message::Spend(SpendTxMessage::SelectHotSigner))
-                            .padding(10)
-                            .style(theme::button::secondary)
-                            .width(Length::Fill)
-                        }))
+                        })
                         .width(Length::Fill),
                 )
                 .spacing(20)

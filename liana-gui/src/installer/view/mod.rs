@@ -1,7 +1,9 @@
 pub mod editor;
 
 use async_hwi::utils::extract_keys_and_template;
-use iced::widget::{checkbox, radio, scrollable, scrollable::Scrollbar, Button, Space, TextInput};
+use iced::widget::{
+    checkbox, radio, scrollable, scrollable::Scrollbar, tooltip, Button, Space, TextInput,
+};
 use iced::{
     alignment,
     widget::{progress_bar, tooltip as iced_tooltip},
@@ -9,7 +11,8 @@ use iced::{
 };
 
 use async_hwi::DeviceKind;
-use liana_ui::component::text;
+use liana::miniscript::bitcoin::bip32::ChildNumber;
+use liana_ui::component::text::{self, p2_regular};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
@@ -22,7 +25,7 @@ use liana::{
 use liana_ui::{
     component::{
         button, card, collapse, form, hw, separation,
-        text::{h2, h3, h4_bold, h5_regular, p1_regular, text, Text},
+        text::{h2, h3, h4_bold, p1_bold, p1_regular, text, Text},
     },
     icon, theme,
     widget::*,
@@ -52,18 +55,23 @@ pub fn import_wallet_or_descriptor<'a>(
     invitation_wallet: Option<&'a str>,
     imported_descriptor: &'a form::Value<String>,
     error: Option<&'a String>,
-    wallets: Vec<&'a String>,
+    wallets: Vec<(&'a String, Option<&'a String>)>,
 ) -> Element<'a, Message> {
     let mut col_wallets = Column::new()
         .spacing(20)
         .push(h4_bold("Load a previously used wallet"));
     let no_wallets = wallets.is_empty();
-    for (i, wallet) in wallets.into_iter().enumerate() {
+    for (i, (name, alias)) in wallets.into_iter().enumerate() {
         col_wallets = col_wallets.push(
-            Button::new(h5_regular(wallet).width(Length::Fill))
-                .style(theme::button::secondary)
-                .padding(10)
-                .on_press(Message::Select(i)),
+            Button::new(
+                Column::new()
+                    .push_maybe(alias.map(p1_bold))
+                    .push(p1_regular(name))
+                    .width(Length::Fill),
+            )
+            .style(theme::button::secondary)
+            .padding(10)
+            .on_press(Message::Select(i)),
         );
     }
     let card_wallets: Element<'a, Message> = if no_wallets {
@@ -468,6 +476,7 @@ pub fn hardware_wallet_xpubs<'a>(
     xpubs: Option<&'a Vec<String>>,
     processing: bool,
     error: Option<&Error>,
+    accounts: &HashMap<Fingerprint, ChildNumber>,
 ) -> Element<'a, Message> {
     let mut bttn = Button::new(match hw {
         HardwareWallet::Supported {
@@ -480,7 +489,14 @@ pub fn hardware_wallet_xpubs<'a>(
             if processing {
                 hw::processing_hardware_wallet(kind, version.as_ref(), fingerprint, alias.as_ref())
             } else {
-                hw::supported_hardware_wallet(kind, version.as_ref(), fingerprint, alias.as_ref())
+                hw::supported_hardware_wallet_with_account(
+                    kind,
+                    version.as_ref(),
+                    *fingerprint,
+                    alias.as_ref(),
+                    accounts.get(fingerprint).cloned(),
+                    true,
+                )
             }
         }
         HardwareWallet::Unsupported {
@@ -558,17 +574,24 @@ pub fn share_xpubs<'a>(
     hws: Vec<Element<'a, Message>>,
     signer: Element<'a, Message>,
 ) -> Element<'a, Message> {
+    let info = Column::new()
+        .push(Space::with_height(5))
+        .push(tooltip::Tooltip::new(
+            icon::tooltip_icon(),
+            "Switch account if you already use the same hardware in other configurations",
+            tooltip::Position::Bottom,
+        ));
+    let title = Row::new()
+        .push(text("Import an extended public key by selecting a signing device:").bold())
+        .push(Space::with_width(10))
+        .push(info)
+        .push(Space::with_width(Length::Fill));
     layout(
         (0, 0),
         email,
         "Share your public keys (Xpubs)",
         Column::new()
-            .push(
-                Container::new(
-                    text("Import an extended public key by selecting a signing device:").bold(),
-                )
-                .width(Length::Fill),
-            )
+            .push(title)
             .push_maybe(if hws.is_empty() {
                 Some(p1_regular("No signing device connected").style(theme::text::secondary))
             } else {
@@ -712,6 +735,8 @@ pub fn register_descriptor<'a>(
                                         .map(|fg| registered.contains(&fg))
                                         .unwrap_or(false),
                                     Some(descriptor),
+                                    false,
+                                    None,
                                     false,
                                 ))
                             }),
@@ -1485,7 +1510,7 @@ pub fn install<'a>(
     progress: (usize, usize),
     email: Option<&'a str>,
     generating: bool,
-    config_path: Option<&std::path::PathBuf>,
+    installed: bool,
     warning: Option<&'a String>,
 ) -> Element<'a, Message> {
     let prev_msg = if !generating && warning.is_some() {
@@ -1501,7 +1526,7 @@ pub fn install<'a>(
             .push_maybe(warning.map(|e| card::invalid(text(e))))
             .push(if generating {
                 Container::new(text("Installing..."))
-            } else if config_path.is_some() {
+            } else if installed {
                 Container::new(
                     Row::new()
                         .spacing(10)
@@ -1650,6 +1675,7 @@ pub fn defined_sequence<'a>(
     .into()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn hw_list_view<'a>(
     i: usize,
     hw: &'a HardwareWallet,
@@ -1658,6 +1684,8 @@ pub fn hw_list_view<'a>(
     selected: bool,
     descriptor: Option<&'a LianaDescriptor>,
     device_must_support_taproot: bool,
+    accounts: Option<&HashMap<Fingerprint, ChildNumber>>,
+    display_account: bool,
 ) -> Element<'a, Message> {
     let mut unrelated = false;
     let mut bttn = Button::new(match hw {
@@ -1679,13 +1707,24 @@ pub fn hw_list_view<'a>(
             } else if chosen && processing {
                 hw::processing_hardware_wallet(kind, version.as_ref(), fingerprint, alias.as_ref())
             } else if selected {
-                hw::selected_hardware_wallet(kind, version.as_ref(), fingerprint, alias.as_ref(), {
-                    if not_tapminiscript {
-                        Some("Device firmware version does not support taproot miniscript")
-                    } else {
-                        None
-                    }
-                })
+                let acc = accounts
+                    .as_ref()
+                    .and_then(|map| map.get(fingerprint).cloned());
+                hw::selected_hardware_wallet(
+                    kind,
+                    version.as_ref(),
+                    fingerprint,
+                    alias.as_ref(),
+                    {
+                        if not_tapminiscript {
+                            Some("Device firmware version does not support taproot miniscript")
+                        } else {
+                            None
+                        }
+                    },
+                    acc,
+                    display_account,
+                )
             } else if not_tapminiscript {
                 hw::warning_hardware_wallet(
                     kind,
@@ -1694,8 +1733,17 @@ pub fn hw_list_view<'a>(
                     alias.as_ref(),
                     "Device firmware version does not support taproot miniscript",
                 )
+            } else if let Some(accounts) = accounts {
+                hw::supported_hardware_wallet_with_account(
+                    kind,
+                    version.as_ref(),
+                    *fingerprint,
+                    alias.as_ref(),
+                    accounts.get(fingerprint).cloned(),
+                    true,
+                )
             } else {
-                hw::supported_hardware_wallet(kind, version.as_ref(), fingerprint, alias.as_ref())
+                hw::supported_hardware_wallet(kind, version.as_ref(), *fingerprint, alias.as_ref())
             }
         }
         HardwareWallet::Unsupported {
@@ -1731,6 +1779,7 @@ pub fn hw_list_view<'a>(
     bttn.into()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn key_list_view<'a>(
     i: usize,
     name: &'a str,
@@ -1739,7 +1788,9 @@ pub fn key_list_view<'a>(
     version: Option<&'a async_hwi::Version>,
     chosen: bool,
     device_must_support_taproot: bool,
+    accounts: &HashMap<Fingerprint, ChildNumber>,
 ) -> Element<'a, Message> {
+    let account = accounts.get(fingerprint).copied();
     Button::new(if chosen {
         hw::selected_hardware_wallet(
             kind.map(|k| k.to_string()).unwrap_or_default(),
@@ -1753,6 +1804,8 @@ pub fn key_list_view<'a>(
             } else {
                 None
             },
+            account,
+            true,
         )
     } else if device_must_support_taproot
         && kind.map(|kind| is_compatible_with_tapminiscript(kind, version)) == Some(false)
@@ -1765,11 +1818,13 @@ pub fn key_list_view<'a>(
             "Device firmware version does not support taproot miniscript",
         )
     } else {
-        hw::supported_hardware_wallet(
+        hw::supported_hardware_wallet_with_account(
             kind.map(|k| k.to_string()).unwrap_or_default(),
             version,
-            fingerprint,
+            *fingerprint,
             Some(name),
+            account,
+            false,
         )
     })
     .style(theme::button::secondary)
@@ -2140,6 +2195,45 @@ pub fn connection_step_connected<'a>(
 pub const REMOTE_BACKEND_DESC: &str = "Use our service to instantly be ready to transact. Wizardsardine runs the infrastructure, allowing multiple computers or participants to connect and synchronize.\n\nThis is a simpler and safer option for people who want Wizardsardine to keep a backup of their descriptor. You are still in control of your keys, and Wizardsardine does not have any control over your funds, but it will be able to see your wallet's information, associated to an email address. Privacy focused users should run their own infrastructure instead.";
 
 pub const LOCAL_WALLET_DESC: &str = "Use your already existing Bitcoin node or automatically install one. The Liana wallet will not connect to any external server.\n\nThis is the most private option, but the data is locally stored on this computer, only. You must perform your own backups, and share the descriptor with other people you want to be able to access the wallet";
+
+pub fn wallet_alias<'a>(
+    progress: (usize, usize),
+    email: Option<&'a str>,
+    wallet_alias: &form::Value<String>,
+) -> Element<'a, Message> {
+    layout(
+        progress,
+        email,
+        "Give your wallet an alias",
+        Column::new()
+            .push(
+                Column::new()
+                    .spacing(20)
+                    .push(p1_bold("Wallet alias:"))
+                    .push(
+                        form::Form::new("Wallet alias", wallet_alias, Message::WalletAliasEdited)
+                            .warning("Wallet alias is too long.")
+                            .size(text::P1_SIZE)
+                            .padding(10),
+                    )
+                    .push(p2_regular(
+                        "You will be able to change it later in Settings > Wallet",
+                    )),
+            )
+            .push(
+                button::secondary(None, "Next")
+                    .width(Length::Fixed(200.0))
+                    .on_press_maybe(if wallet_alias.valid {
+                        Some(Message::Next)
+                    } else {
+                        None
+                    }),
+            )
+            .spacing(50),
+        true,
+        Some(Message::Previous),
+    )
+}
 
 fn layout<'a>(
     progress: (usize, usize),

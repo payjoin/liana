@@ -29,6 +29,7 @@ use crate::{
     dir::LianaDirectory,
     export::{ImportExportMessage, ImportExportType},
     hw::{HardwareWallet, HardwareWalletConfig, HardwareWallets},
+    services::connect::client::backend::api::WALLET_ALIAS_MAXIMUM_LENGTH,
 };
 
 enum Modal {
@@ -49,6 +50,7 @@ pub struct WalletSettingsState {
     descriptor: LianaDescriptor,
     keys_aliases: Vec<(Fingerprint, form::Value<String>)>,
     wallet: Arc<Wallet>,
+    wallet_alias: form::Value<String>,
     modal: Modal,
     processing: bool,
     updated: bool,
@@ -61,6 +63,10 @@ impl WalletSettingsState {
             data_dir,
             descriptor: wallet.main_descriptor.clone(),
             keys_aliases: Self::keys_aliases(&wallet),
+            wallet_alias: form::Value {
+                value: wallet.alias.clone().unwrap_or_default(),
+                valid: true,
+            },
             wallet,
             warning: None,
             modal: Modal::None,
@@ -103,6 +109,7 @@ impl State for WalletSettingsState {
             cache,
             self.warning.as_ref(),
             &self.descriptor,
+            &self.wallet_alias,
             &self.keys_aliases,
             &self.wallet.provider_keys,
             self.processing,
@@ -159,6 +166,13 @@ impl State for WalletSettingsState {
                     Task::none()
                 }
             }
+            Message::View(view::Message::Settings(view::SettingsMessage::WalletAliasEdited(
+                alias,
+            ))) => {
+                self.wallet_alias.valid = alias.len() < WALLET_ALIAS_MAXIMUM_LENGTH;
+                self.wallet_alias.value = alias;
+                Task::none()
+            }
             Message::View(view::Message::Settings(
                 view::SettingsMessage::FingerprintAliasEdited(fg, value),
             )) => {
@@ -176,10 +190,26 @@ impl State for WalletSettingsState {
                 self.processing = true;
                 self.updated = false;
                 Task::perform(
-                    update_keys_aliases(
+                    update_aliases(
                         self.data_dir.clone(),
                         cache.network,
                         self.wallet.clone(),
+                        match self
+                            .wallet
+                            .alias
+                            .as_ref()
+                            .map(|a| *a == self.wallet_alias.value)
+                        {
+                            Some(true) => None,
+                            Some(false) => Some(self.wallet_alias.value.clone()),
+                            None => {
+                                if self.wallet_alias.value.is_empty() {
+                                    None
+                                } else {
+                                    Some(self.wallet_alias.value.clone())
+                                }
+                            }
+                        },
                         self.keys_aliases
                             .iter()
                             .map(|(fg, name)| (*fg, name.value.to_owned()))
@@ -208,10 +238,11 @@ impl State for WalletSettingsState {
                 self.processing = true;
                 self.updated = false;
                 Task::perform(
-                    update_keys_aliases(
+                    update_aliases(
                         self.data_dir.clone(),
                         cache.network,
                         self.wallet.clone(),
+                        None,
                         aliases.into_iter().map(|(fg, ks)| (fg, ks.name)).collect(),
                         daemon,
                     ),
@@ -258,8 +289,15 @@ impl State for WalletSettingsState {
             }
             Message::View(view::Message::Settings(view::SettingsMessage::ImportWallet)) => {
                 if self.modal.is_none() {
-                    let modal =
-                        ExportModal::new(Some(daemon), ImportExportType::ImportBackup(None, None));
+                    let modal = ExportModal::new(
+                        Some(daemon),
+                        ImportExportType::ImportBackup {
+                            network_dir: cache.datadir_path.network_directory(cache.network),
+                            wallet: self.wallet.clone(),
+                            overwrite_labels: None,
+                            overwrite_aliases: None,
+                        },
+                    );
                     let launch = modal.launch(false);
                     self.modal = Modal::ImportExport(modal);
                     launch
@@ -428,12 +466,12 @@ async fn register_wallet(
 
         if daemon.backend() != DaemonBackend::RemoteBackend {
             let network_dir = data_dir.network_directory(network);
-            let checksum = wallet.descriptor_checksum();
+            let wallet_id = wallet.id();
             update_settings_file(&network_dir, |mut settings| {
                 if let Some(wallet_setting) = settings
                     .wallets
                     .iter_mut()
-                    .find(|w| w.descriptor_checksum == checksum)
+                    .find(|w| w.wallet_id() == wallet_id)
                 {
                     if let Some(hw_config) = wallet_setting
                         .hardware_wallets
@@ -462,7 +500,7 @@ async fn register_wallet(
             wallet.hardware_wallets.push(hw_cfg)
         }
         daemon
-            .update_wallet_metadata(&wallet.keys_aliases, &wallet.hardware_wallets)
+            .update_wallet_metadata(None, &wallet.keys_aliases, &wallet.hardware_wallets)
             .await?;
         return Ok(Arc::new(wallet));
     }
@@ -470,21 +508,42 @@ async fn register_wallet(
     Ok(wallet)
 }
 
-pub async fn update_keys_aliases(
+pub async fn update_aliases(
     data_dir: LianaDirectory,
     network: Network,
     wallet: Arc<Wallet>,
+    wallet_alias: Option<String>,
     keys_aliases: Vec<(Fingerprint, String)>,
     daemon: Arc<dyn Daemon + Sync + Send>,
 ) -> Result<Arc<Wallet>, Error> {
-    if daemon.backend() != DaemonBackend::RemoteBackend {
+    let mut wallet = wallet.as_ref().clone();
+
+    if let Some(wallet_alias) = wallet_alias.as_ref() {
+        wallet = wallet.with_alias(Some(wallet_alias.clone()));
         let network_dir = data_dir.network_directory(network);
-        let checksum = wallet.descriptor_checksum();
+        let wallet_id = wallet.id();
         update_settings_file(&network_dir, |mut settings| {
             if let Some(wallet_setting) = settings
                 .wallets
                 .iter_mut()
-                .find(|w| w.descriptor_checksum == checksum)
+                .find(|w| w.wallet_id() == wallet_id)
+            {
+                wallet_setting.alias = Some(wallet_alias.clone());
+            }
+
+            settings
+        })
+        .await?;
+    }
+
+    if daemon.backend() != DaemonBackend::RemoteBackend {
+        let network_dir = data_dir.network_directory(network);
+        let wallet_id = wallet.id();
+        update_settings_file(&network_dir, |mut settings| {
+            if let Some(wallet_setting) = settings
+                .wallets
+                .iter_mut()
+                .find(|w| w.wallet_id() == wallet_id)
             {
                 wallet_setting.keys = keys_aliases
                     .iter()
@@ -501,11 +560,10 @@ pub async fn update_keys_aliases(
         .await?;
     }
 
-    let mut wallet = wallet.as_ref().clone();
     wallet.keys_aliases = keys_aliases.into_iter().collect();
 
     daemon
-        .update_wallet_metadata(&wallet.keys_aliases, &wallet.hardware_wallets)
+        .update_wallet_metadata(wallet_alias, &wallet.keys_aliases, &wallet.hardware_wallets)
         .await?;
 
     Ok(Arc::new(wallet))

@@ -165,10 +165,12 @@ pub enum ImportExportType {
     ExportXpub(String),
     ExportBackup(String),
     ExportProcessBackup(LianaDirectory, Network, Arc<Config>, Arc<Wallet>),
-    ImportBackup(
-        Option<Sender<bool>>, /*overwrite_labels*/
-        Option<Sender<bool>>, /*overwrite_aliases*/
-    ),
+    ImportBackup {
+        network_dir: NetworkDirectory,
+        wallet: Arc<Wallet>,
+        overwrite_labels: Option<Sender<bool>>,
+        overwrite_aliases: Option<Sender<bool>>,
+    },
     WalletFromBackup,
     Descriptor(LianaDescriptor),
     ExportLabels,
@@ -187,25 +189,11 @@ impl ImportExportType {
             | ImportExportType::ExportProcessBackup(..)
             | ImportExportType::ExportXpub(_)
             | ImportExportType::ExportLabels => "Export successful!",
-            ImportExportType::ImportBackup(_, _)
+            ImportExportType::ImportBackup { .. }
             | ImportExportType::ImportPsbt(_)
             | ImportExportType::ImportXpub(_)
             | ImportExportType::WalletFromBackup
             | ImportExportType::ImportDescriptor => "Import successful",
-        }
-    }
-}
-
-impl PartialEq for ImportExportType {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::ExportPsbt(l0), Self::ExportPsbt(r0)) => l0 == r0,
-            (Self::ExportBackup(l0), Self::ExportBackup(r0)) => l0 == r0,
-            (Self::ImportBackup(l0, l1), Self::ImportBackup(r0, r1)) => {
-                l0.is_some() == r0.is_some() && l1.is_some() == r1.is_some()
-            }
-            (Self::Descriptor(l0), Self::Descriptor(r0)) => l0 == r0,
-            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
 }
@@ -321,7 +309,11 @@ impl Export {
                 )
                 .await
             }
-            ImportExportType::ImportBackup(..) => import_backup(&sender, path, daemon).await,
+            ImportExportType::ImportBackup {
+                network_dir,
+                wallet,
+                ..
+            } => import_backup(&network_dir, wallet, &sender, path, daemon).await,
             ImportExportType::WalletFromBackup => wallet_from_backup(&sender, path).await,
         } {
             if let Err(e) = sender.send(Progress::Error(e)) {
@@ -663,23 +655,50 @@ pub async fn import_xpub(
     file.read_to_string(&mut xpub_str)?;
     let xpub_str = xpub_str.trim().to_string();
 
-    if let Ok(DescriptorPublicKey::XPub(key)) = DescriptorPublicKey::from_str(&xpub_str) {
-        let valid = if network == Network::Bitcoin {
-            key.xkey.network == Network::Bitcoin.into()
+    let (descriptor_pubkey, key) =
+        if let Some(DescriptorPublicKey::XPub(key)) = parse_raw_xpub(&xpub_str) {
+            (DescriptorPublicKey::XPub(key.clone()), key)
+        } else if let Some(DescriptorPublicKey::XPub(key)) = parse_coldcard_xpub(&xpub_str) {
+            (DescriptorPublicKey::XPub(key.clone()), key)
         } else {
-            key.xkey.network == Network::Testnet.into()
+            return Err(Error::ParseXpub);
         };
-        if valid {
-            send_progress!(sender, Progress(100.0));
-            send_progress!(sender, Xpub(xpub_str));
-        } else {
-            return Err(Error::XpubNetwork);
-        }
+    let xpub_str = descriptor_pubkey.to_string();
+
+    let valid = if network == Network::Bitcoin {
+        key.xkey.network == Network::Bitcoin.into()
     } else {
-        return Err(Error::ParseXpub);
+        key.xkey.network == Network::Testnet.into()
+    };
+    if valid {
+        send_progress!(sender, Progress(100.0));
+        send_progress!(sender, Xpub(xpub_str));
+    } else {
+        return Err(Error::XpubNetwork);
     }
 
     Ok(())
+}
+
+pub fn parse_raw_xpub(raw_xpub: &str) -> Option<DescriptorPublicKey> {
+    DescriptorPublicKey::from_str(raw_xpub).ok()
+}
+
+pub fn parse_coldcard_xpub(coldcard_xpub: &str) -> Option<DescriptorPublicKey> {
+    if let serde_json::Value::Object(map) = serde_json::from_str(coldcard_xpub).ok()? {
+        let fg = map.get("xfp")?.to_string().to_lowercase();
+        let fg = fg.replace("\"", "");
+        if let serde_json::Value::Object(bip48) = map.get("bip48_2")? {
+            let deriv = bip48.get("deriv")?.to_string();
+            let deriv = deriv.replace("\"", "");
+            let deriv = deriv.replace("m", "");
+            let xpub = bip48.get("xpub")?.to_string();
+            let xpub = xpub.replace("\"", "");
+            let raw_xpub = format!("[{fg}{deriv}]{xpub}");
+            return parse_raw_xpub(&raw_xpub);
+        }
+    }
+    None
 }
 
 /// Import a backup in an already existing wallet:
@@ -694,6 +713,8 @@ pub async fn import_xpub(
 ///    - import labels if no conflict or user ACK
 ///    - update aliases if no conflict or user ACK
 pub async fn import_backup(
+    network_dir: &NetworkDirectory,
+    wallet: Arc<Wallet>,
     sender: &UnboundedSender<Progress>,
     path: PathBuf,
     daemon: Option<Arc<dyn Daemon + Sync + Send>>,
@@ -810,32 +831,16 @@ pub async fn import_backup(
         Vec::new()
     };
 
-    let lianad_datadir = daemon
-        .config()
-        .and_then(|c| c.data_directory())
-        .ok_or(Error::BackupImport("Failed to get Daemon config".into()))?;
-
-    let descriptor_checksum = descriptor
-        .to_string()
-        .split_once('#')
-        .map(|(_, checksum)| checksum)
-        .unwrap()
-        .to_string();
-
     // check if key aliases can be imported w/o conflict
     let mut write_aliases = true;
     let settings = if !account.keys.is_empty() {
-        // TODO: change lianad_datadir is common to gui datadir only for legacy wallet before
-        // multiple wallet
-        let network_dir = NetworkDirectory::new(lianad_datadir.path().to_path_buf());
-        let wallet_settings = match WalletSettings::from_file(&network_dir, |w| {
-            w.descriptor_checksum == descriptor_checksum
-        }) {
-            Ok(Some(s)) => s,
-            _ => {
-                return Err(Error::BackupImport("Failed to get App Settings".into()));
-            }
-        };
+        let wallet_settings =
+            match WalletSettings::from_file(network_dir, |w| w.wallet_id() == wallet.id()) {
+                Ok(Some(s)) => s,
+                _ => {
+                    return Err(Error::BackupImport("Failed to get App Settings".into()));
+                }
+            };
 
         let settings_aliases: HashMap<_, _> = wallet_settings
             .keys
@@ -937,19 +942,16 @@ pub async fn import_backup(
             }
         }
 
-        if let Err(e) = update_settings_file(
-            &NetworkDirectory::new(lianad_datadir.path().to_path_buf()),
-            |mut settings| {
-                if let Some(wallet) = settings
-                    .wallets
-                    .iter_mut()
-                    .find(|w| w.descriptor_checksum == descriptor_checksum)
-                {
-                    wallet.keys = settings_aliases.clone().into_values().collect();
-                }
-                settings
-            },
-        )
+        if let Err(e) = update_settings_file(network_dir, |mut settings| {
+            if let Some(wallet) = settings
+                .wallets
+                .iter_mut()
+                .find(|w| w.wallet_id() == wallet.id())
+            {
+                wallet.keys = settings_aliases.clone().into_values().collect();
+            }
+            settings
+        })
         .await
         {
             return Err(Error::BackupImport(format!(
@@ -1268,4 +1270,80 @@ pub async fn app_backup_export(
         .await
         .map_err(Error::Backup)?;
     export_string(sender, path, backup).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_coldcard_xpub() {
+        let raw = r#"
+            {
+              "chain": "XTN",
+              "xfp": "C658B283",
+              "account": 3,
+              "xpub": "tpubD6NzVbkrYhZ4XHQ1pLJ7pdpEGWCVbSUEaUakxnrtENzaZaDp4vL6gBgGH7n983ZPgsVe5G2JEAM2oYZkEPCNrfo9XLq8nHFhp9GzFjGc1uQ",
+              "bip44": {
+                "name": "p2pkh",
+                "xfp": "F623F3D0",
+                "deriv": "m/44h/1h/3h",
+                "xpub": "tpubDCrmGPwVjNJsUDsh7pxsWgTZ1sjFZtnPPhpgCxM3yXg6RXjfDQ73g6mX6H2Hn69j5S5MJnhEr7mSvTzaz7qcrYzyZK7Aw836Qwkj1brgDh8",
+                "desc": "pkh([c658b283/44h/1h/3h]tpubDCrmGPwVjNJsUDsh7pxsWgTZ1sjFZtnPPhpgCxM3yXg6RXjfDQ73g6mX6H2Hn69j5S5MJnhEr7mSvTzaz7qcrYzyZK7Aw836Qwkj1brgDh8/<0;1>/*)#2w5s7qf5",
+                "first": "miu3fgGrAZqtPb6iWwUD1pi7MRqWnkVTeG"
+              },
+              "bip49": {
+                "name": "p2sh-p2wpkh",
+                "xfp": "1226F685",
+                "deriv": "m/49h/1h/3h",
+                "xpub": "tpubDDMPh7VRRQ7waHhLDskFU63ZY4Pdue8vPLhim4Nf34nX8KpFZ4yPt5wDtwuQQ79jn7AvpGBCVreVdhPvJCqCSi5zznCwZ61YYnLdGBmn3As",
+                "desc": "sh(wpkh([c658b283/49h/1h/3h]tpubDDMPh7VRRQ7waHhLDskFU63ZY4Pdue8vPLhim4Nf34nX8KpFZ4yPt5wDtwuQQ79jn7AvpGBCVreVdhPvJCqCSi5zznCwZ61YYnLdGBmn3As/<0;1>/*))#3c4vfpj8",
+                "_pub": "upub5EUyFsezG5Y3kbw8GcQHduRgh2re6PfN6NYm4KdrZ8tzDjhrisdcsTHybHwrstEjmHHbxFseamkoHf4ckFjvAZauLANN7ptr9eZHLRHAtJz",
+                "first": "2MueqD2UoZZ566mLqTVCVT5Dm7YMbVBwPeq"
+              },
+              "bip84": {
+                "name": "p2wpkh",
+                "xfp": "B74B1EF5",
+                "deriv": "m/84h/1h/3h",
+                "xpub": "tpubDDKQtgKtTeTVebMfJ6RJ6vL7UMnDjhUfK7scrYiWGMWy8htipN9dCkuHqx9PmJoAUoydwsc9TEoj3A1C1FbPqzxKth8qfn7axA5qHc5YbJz",
+                "desc": "wpkh([c658b283/84h/1h/3h]tpubDDKQtgKtTeTVebMfJ6RJ6vL7UMnDjhUfK7scrYiWGMWy8htipN9dCkuHqx9PmJoAUoydwsc9TEoj3A1C1FbPqzxKth8qfn7axA5qHc5YbJz/<0;1>/*)#0ac7rpv0",
+                "_pub": "vpub5ZHFm7ANT1R5gCnaBBrxUpojoJPfs4zbwGEswCsbAS1KHDbZEpyQpBvBZW9SEzY5sdD7qLu9zpGaaQHTAzv8N68q6QzgpRpNpkN8kStaFVA",
+                "first": "tb1qt8l4mel8c8epzcrqchmrsdsv6e8n0chkynuxzz"
+              },
+              "bip86": {
+                "name": "p2tr",
+                "xfp": "99B6CEE8",
+                "deriv": "m/86h/1h/3h",
+                "xpub": "tpubDDNzAa2tRWaaiDVf6qnzMYjELyz68DrBzGW6PtsZkWz3tU4QZLUhB9TSxxT4KF4sXncg856etJ1rDM2XHibm21uCxQtLjMd4aR9EXydtEpY",
+                "desc": "tr([c658b283/86h/1h/3h]tpubDDNzAa2tRWaaiDVf6qnzMYjELyz68DrBzGW6PtsZkWz3tU4QZLUhB9TSxxT4KF4sXncg856etJ1rDM2XHibm21uCxQtLjMd4aR9EXydtEpY/<0;1>/*)#ggndxtk6",
+                "first": "tb1pcawjnx5krtffagyzvcmqz40z3hds3nycc2vtjj9ngy8hskk5zwzsfh2a3w"
+              },
+              "bip48_1": {
+                "name": "p2sh-p2wsh",
+                "xfp": "141AB091",
+                "deriv": "m/48h/1h/3h/1h",
+                "xpub": "tpubDFmeRMxr4X7dtY9C9H6gAnVBfzBfjrmJ961ST2STHfQQwrHWMtEU1Zgr2PUfQQL4q9uywHxDJcffmRRpL58RJeSuaVs5CYzrcBrMoobyVRH",
+                "desc": "sh(wsh(sortedmulti(M,[c658b283/48h/1h/3h/1h]tpubDFmeRMxr4X7dtY9C9H6gAnVBfzBfjrmJ961ST2STHfQQwrHWMtEU1Zgr2PUfQQL4q9uywHxDJcffmRRpL58RJeSuaVs5CYzrcBrMoobyVRH/0/*,...)))",
+                "_pub": "Upub5ToK7MrrUA67VRYN8gDhAgD7Ykgw8xyLAPW9fYyCBWMHfSk2J6Gy63uXXSUbScdy3o6dwsenGkAUYYiH5MC6Az4UkM8uAhMA6nLtTzhps22"
+              },
+              "bip48_2": {
+                "name": "p2wsh",
+                "xfp": "88AD98C4",
+                "deriv": "m/48h/1h/3h/2h",
+                "xpub": "tpubDFmeRMxr4X7dxNKxxBKWXu1rskHEQYB8vY5PYPmiB74EjyrE814HHpQzh2XEFpm3z5uJpk7Cjt2hmhcMYmBbot6CmRHn3CKK2K6vzLPBMbH",
+                "desc": "wsh(sortedmulti(M,[c658b283/48h/1h/3h/2h]tpubDFmeRMxr4X7dxNKxxBKWXu1rskHEQYB8vY5PYPmiB74EjyrE814HHpQzh2XEFpm3z5uJpk7Cjt2hmhcMYmBbot6CmRHn3CKK2K6vzLPBMbH/0/*,...))",
+                "_pub": "Vpub5ndaR2XmcqdbQYvFmwE9jsqHvUvwkGNfrx6KYKCLSxNzWg7yJsGLzNHpDHUkHwiscNCmaoQLAft4S7WP1jfHUTPNocG2bFV6ndf736mPM9R"
+              },
+              "bip48_3": {
+                "name": "p2tr",
+                "xfp": "C3F84B2C",
+                "deriv": "m/48h/1h/3h/3h",
+                "xpub": "tpubDFmeRMxr4X7e1LErDJWLDRjrHGfirhnFxk3aZoFe8tjMHUyPjh1mATfLfyC6VKUfuS4uBEhMuow7kQWfNqA7U2uHz7fyT9S6V49MLQmyzjm",
+                "desc": "tr(50929b74c1a04954b78b4b6035e97a5e078a5a0f28ec96d547bfee9ace803ac0,sortedmulti_a(M,[c658b283/48h/1h/3h/3h]tpubDFmeRMxr4X7e1LErDJWLDRjrHGfirhnFxk3aZoFe8tjMHUyPjh1mATfLfyC6VKUfuS4uBEhMuow7kQWfNqA7U2uHz7fyT9S6V49MLQmyzjm/0/*,...))"
+              }
+            }
+        "#;
+        let expected = "[c658b283/48'/1'/3'/2']tpubDFmeRMxr4X7dxNKxxBKWXu1rskHEQYB8vY5PYPmiB74EjyrE814HHpQzh2XEFpm3z5uJpk7Cjt2hmhcMYmBbot6CmRHn3CKK2K6vzLPBMbH".to_string();
+        assert_eq!(expected, parse_coldcard_xpub(raw).unwrap().to_string());
+    }
 }

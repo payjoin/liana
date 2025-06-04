@@ -1,8 +1,11 @@
 use liana::miniscript::{
-    bitcoin::{bip32::Fingerprint, Network},
+    bitcoin::{
+        bip32::{ChildNumber, Fingerprint},
+        Network,
+    },
     DescriptorPublicKey,
 };
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
 
 use super::{context, Error};
 use crate::{
@@ -28,7 +31,11 @@ use crate::{
 #[derive(Debug, Clone)]
 pub enum Message {
     UserActionDone(bool),
-    Exit(PathBuf, Option<Bitcoind>, /* remove log */ bool),
+    Exit(
+        Box<settings::WalletSettings>,
+        Option<Bitcoind>,
+        /* remove log */ bool,
+    ),
     Clibpboard(String),
     Next,
     Skip,
@@ -39,7 +46,7 @@ pub enum Message {
     Reload,
     Select(usize),
     UseHotSigner,
-    Installed(Result<PathBuf, Error>),
+    Installed(settings::WalletId, Result<settings::WalletSettings, Error>),
     CreateTaprootDescriptor(bool),
     SelectDescriptorTemplate(context::DescriptorTemplate),
     SelectBackend(SelectBackend),
@@ -62,6 +69,8 @@ pub enum Message {
     ImportExport(ImportExportMessage),
     ImportBackup,
     WalletFromBackup((HashMap<Fingerprint, settings::KeySetting>, Backup)),
+    WalletAliasEdited(String),
+    SelectAccount(Fingerprint, ChildNumber),
 }
 
 impl Close for Message {
@@ -73,6 +82,12 @@ impl Close for Message {
 impl From<ImportExportMessage> for Message {
     fn from(value: ImportExportMessage) -> Self {
         Message::ImportExport(value)
+    }
+}
+
+impl From<(Fingerprint, ChildNumber)> for Message {
+    fn from(value: (Fingerprint, ChildNumber)) -> Self {
+        Self::SelectAccount(value.0, value.1)
     }
 }
 
@@ -150,6 +165,7 @@ pub enum DefineDescriptor {
     AddSafetyNetPath,
     KeyModal(ImportKeyModal),
     ThresholdSequenceModal(ThresholdSequenceModal),
+    Reset,
 }
 
 #[allow(clippy::large_enum_variant)]
