@@ -297,7 +297,7 @@ fn process_receiver_session(
 
         // No need to check Completed
         if status == PayjoinStatus::Completed {
-            return Ok(());
+            continue;
         }
 
         log::info!("[Payjoin] {:?}: bip21={:?}", status, maybe_bip21);
