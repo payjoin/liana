@@ -7,18 +7,22 @@ use std::{
 use liana::descriptors;
 
 use payjoin::{
-    bitcoin::{psbt::Input, secp256k1, FeeRate, OutPoint, Sequence, TxIn},
+    bitcoin::{
+        consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence, TxIn,
+    },
     persist::OptionalTransitionOutcome,
     receive::{
         v2::{
-            replay_receiver_event_log, Receiver, ReceiverSessionEvent, ReceiverState,
-            ReceiverWithContext, UncheckedProposal,
+            replay_receiver_event_log, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown,
+            PayjoinProposal, ProvisionalProposal, Receiver, ReceiverState, ReceiverWithContext,
+            SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs,
         },
         InputPair,
     },
 };
 
 use crate::{
+    bitcoin::BitcoinInterface,
     database::{Coin, CoinStatus, DatabaseConnection, DatabaseInterface},
     payjoin::{
         db::SessionMetadata,
@@ -26,13 +30,117 @@ use crate::{
     },
 };
 
-use super::{
-    db::{ReceiverPersister, SessionWrapper},
-    types::PayjoinStatus,
-};
+use super::{db::ReceiverPersister, types::PayjoinStatus};
 
-fn handle_directory_proposal(
+fn read_from_directory(
+    receiver: Receiver<ReceiverWithContext>,
+    persister: &ReceiverPersister,
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
+    descs: &[descriptors::SinglePathLianaDesc],
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) -> Result<(), Box<dyn Error>> {
+    let mut receiver = receiver;
+    let (req, context) = receiver
+        .extract_req(OHTTP_RELAY)
+        .expect("Failed to extract request");
+    let proposal = match post_request(req.clone()) {
+        Ok(ohttp_response) => {
+            let state_transition = receiver
+                .process_res(
+                    ohttp_response
+                        .bytes()
+                        .expect("Failed to read response")
+                        .as_ref(),
+                    context,
+                )
+                .save(persister);
+            match state_transition {
+                Ok(OptionalTransitionOutcome::Progress(next_state)) => next_state,
+                Ok(OptionalTransitionOutcome::Stasis(_current_state)) => {
+                    return Err("NoResults".into())
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(e) => return Err(e),
+    };
+    check_proposal(proposal, persister, db_conn, bit, descs, secp)
+}
+
+fn check_proposal(
     proposal: Receiver<UncheckedProposal>,
+    persister: &ReceiverPersister,
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
+    descs: &[descriptors::SinglePathLianaDesc],
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) -> Result<(), Box<dyn Error>> {
+    // Receive Check 1: Can Broadcast
+    let proposal = proposal
+        .check_broadcast_suitability(None, |tx| {
+            let result = bit.test_mempool_accept(vec![serialize_hex(tx)]);
+            match result.first().cloned() {
+                Some(can_broadcast) => Ok(can_broadcast),
+                None => Ok(false),
+            }
+        })
+        .save(persister)?;
+    check_inputs_not_owned(proposal, persister, db_conn, descs, secp)
+}
+
+fn check_inputs_not_owned(
+    proposal: Receiver<MaybeInputsOwned>,
+    persister: &ReceiverPersister,
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    descs: &[descriptors::SinglePathLianaDesc],
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) -> Result<(), Box<dyn Error>> {
+    let proposal = proposal
+        .check_inputs_not_owned(|_| Ok(false))
+        .save(persister)?;
+    check_no_inputs_seen_before(proposal, persister, db_conn, descs, secp)
+}
+
+fn check_no_inputs_seen_before(
+    proposal: Receiver<MaybeInputsSeen>,
+    persister: &ReceiverPersister,
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    descs: &[descriptors::SinglePathLianaDesc],
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) -> Result<(), Box<dyn Error>> {
+    let proposal = proposal
+        .check_no_inputs_seen_before(|_| Ok(false))
+        .save(persister)?;
+    identify_receiver_outputs(proposal, persister, db_conn, descs, secp)
+}
+
+fn identify_receiver_outputs(
+    proposal: Receiver<OutputsUnknown>,
+    persister: &ReceiverPersister,
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    descs: &[descriptors::SinglePathLianaDesc],
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) -> Result<(), Box<dyn Error>> {
+    let proposal = proposal
+        .identify_receiver_outputs(|_| Ok(true))
+        .save(persister)?;
+    commit_outputs(proposal, persister, db_conn, descs, secp)
+}
+
+fn commit_outputs(
+    proposal: Receiver<WantsOutputs>,
+    persister: &ReceiverPersister,
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    descs: &[descriptors::SinglePathLianaDesc],
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) -> Result<(), Box<dyn Error>> {
+    let proposal = proposal.commit_outputs().save(persister)?;
+    contribute_inputs(proposal, persister, db_conn, descs, secp)
+}
+
+fn contribute_inputs(
+    proposal: Receiver<WantsInputs>,
     persister: &ReceiverPersister,
     db_conn: &mut Box<dyn DatabaseConnection>,
     descs: &[descriptors::SinglePathLianaDesc],
@@ -56,7 +164,7 @@ fn handle_directory_proposal(
         };
 
         let txin = TxIn {
-            previous_output: outpoint.clone(),
+            previous_output: *outpoint,
             sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
             ..Default::default()
         };
@@ -69,138 +177,127 @@ fn handle_directory_proposal(
 
         receiver_derived_desc.update_psbt_in(&mut psbtin);
 
-        candidate_inputs_map.insert(outpoint.clone(), (*coin, txin, psbtin));
+        candidate_inputs_map.insert(*outpoint, (*coin, txin, psbtin));
     }
 
     let candidate_inputs = candidate_inputs_map
         .values()
         .map(|(_, txin, psbtin)| InputPair::new(txin.clone(), psbtin.clone()).unwrap());
 
-    // in a payment processor where the sender could go offline, this is where you schedule to broadcast the original_tx
-    let _to_broadcast_in_failure_case = proposal.extract_tx_to_schedule_broadcast();
-
-    // Receive Check 1: Can Broadcast
-    let proposal = proposal
-        .check_broadcast_suitability(None, |_| Ok(true))
-        .save(persister)?;
-
-    // Receive Check 2: receiver can't sign for proposal inputs
-    let proposal = proposal
-        .check_inputs_not_owned(|_input| Ok(false))
-        .save(persister)?;
-
-    // Receive Check 3: have we seen this input before? More of a check for non-interactive i.e. payment processor receivers.
-    let proposal = proposal
-        .check_no_inputs_seen_before(|_| Ok(false))
-        .save(persister)?;
-
-    // Receive Check 4: identify receiver outputs
-    let proposal = proposal
-        .identify_receiver_outputs(|_| Ok(true))
-        .save(persister)?;
-
-    // Receive Check 5: commit outputs
-    let proposal = proposal.commit_outputs().save(persister)?;
-
-    let selected_input = proposal.try_preserving_privacy(candidate_inputs)?;
+    let selected_input = proposal.try_preserving_privacy(candidate_inputs).unwrap();
 
     proposal
-        .contribute_inputs(vec![selected_input])
-        .map_err(|e| format!("Failed to contribute inputs: {e:?}"))?
+        .contribute_inputs(vec![selected_input])?
         .commit_inputs()
         .save(persister)?;
+
+    let (_, history) = replay_receiver_event_log(persister.clone())
+        .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))
+        .unwrap();
+
+    let psbt = history.psbt_with_contributed_inputs().unwrap();
+    let bip21 = history.pj_uri().unwrap().to_string();
+
+    db_conn.store_spend(&psbt);
+    log::info!("[Payjoin] PSBT in the DB...");
+
+    persister.update_metada(
+        Some(PayjoinStatus::Signing),
+        Some(psbt.unsigned_tx.compute_txid()),
+        Some(psbt.clone()),
+        Some(bip21.clone()),
+    );
 
     Ok(())
 }
 
-fn poll_fallback(
-    receiver: Receiver<ReceiverWithContext>,
+fn finalize_proposal(
+    proposal: Receiver<ProvisionalProposal>,
     persister: &ReceiverPersister,
-) -> Result<Receiver<UncheckedProposal>, Box<dyn Error>> {
-    let mut receiver = receiver;
-    let (req, context) = receiver
-        .extract_req(OHTTP_RELAY)
-        .expect("Failed to extract request");
-    match post_request(req.clone()) {
-        Ok(ohttp_response) => {
-            let state_transition = receiver
-                .process_res(
-                    ohttp_response
-                        .bytes()
-                        .expect("Failed to read response")
-                        .as_ref(),
-                    context,
-                )
-                .save(persister);
-            match state_transition {
-                Ok(OptionalTransitionOutcome::Progress(next_state)) => Ok(next_state),
-                Ok(OptionalTransitionOutcome::Stasis(_current_state)) => Err("NoResults".into()),
-                Err(e) => return Err(e.into()),
+    history: SessionHistory,
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) -> Result<(), Box<dyn Error>> {
+    if let Some(txid) = history.proposal_txid() {
+        if let Some(psbt) = db_conn.spend_tx(&txid) {
+            let mut is_signed = false;
+            for psbtin in &psbt.inputs {
+                if !psbtin.partial_sigs.is_empty() {
+                    log::debug!("[Payjoin] PSBT is signed!");
+                    is_signed = true;
+                    break;
+                }
+            }
+
+            if is_signed {
+                let mut psbt = psbt.clone();
+                finalize_psbt(&mut psbt, secp);
+
+                let proposal = proposal
+                    .finalize_proposal(
+                        |_| Ok(psbt.clone()),
+                        None,
+                        Some(FeeRate::from_sat_per_vb(150).unwrap()),
+                    )
+                    .save(persister)?;
+
+                send_payjoin_proposal(proposal, persister, history)?;
             }
         }
-        Err(e) => Err(e.into()),
     }
+    Ok(())
+}
+
+fn send_payjoin_proposal(
+    mut proposal: Receiver<PayjoinProposal>,
+    persister: &ReceiverPersister,
+    history: SessionHistory,
+) -> Result<(), Box<dyn Error>> {
+    let (req, ctx) = proposal
+        .extract_req(OHTTP_RELAY)
+        .expect("Failed to extract request");
+
+    let psbt = proposal.psbt().clone();
+    let txid = psbt.unsigned_tx.compute_txid();
+
+    // Respond to sender
+    log::info!("[Payjoin] Receiver responding to sender...");
+    match post_request(req) {
+        Ok(resp) => {
+            proposal
+                .process_res(resp.bytes().expect("Failed to read response").as_ref(), ctx)
+                .save(persister)?;
+
+            let bip21 = history.pj_uri().unwrap();
+            persister.update_metada(
+                Some(PayjoinStatus::Completed),
+                Some(txid),
+                Some(psbt),
+                Some(bip21.to_string()),
+            );
+        }
+        Err(err) => log::error!("[Payjoin] send_payjoin_proposal(): {}", err),
+    }
+    Ok(())
 }
 
 fn process_receiver_session(
-    session: SessionWrapper<ReceiverSessionEvent>,
-    state: ReceiverState,
-    persister: ReceiverPersister,
-    db_conn: &mut Box<dyn DatabaseConnection>,
+    db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>,
+    bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
     descs: &[descriptors::SinglePathLianaDesc],
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
-    match state {
-        ReceiverState::WithContext(receiver) => {
-            log::info!("[Payjoin] ReceiverState::WithContext");
-            if session.metadata.status == PayjoinStatus::Pending {
-                match poll_fallback(receiver, &persister) {
-                    Ok(proposal) => {
-                        handle_directory_proposal(proposal, &persister, db_conn, descs, secp)?;
-
-                        let (_, history) = replay_receiver_event_log(persister.clone())
-                            .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))
-                            .unwrap();
-
-                        let psbt = history.psbt_with_contributed_inputs().unwrap();
-                        let bip21 = history.pj_uri().unwrap().to_string();
-
-                        db_conn.store_spend(&psbt);
-                        log::info!("[Payjoin] ReceiverState::WithContext: PSBT in the DB...");
-
-                        persister.update_metada(
-                            Some(PayjoinStatus::Signing),
-                            Some(psbt.unsigned_tx.compute_txid()),
-                            Some(psbt.clone()),
-                            Some(bip21.clone()),
-                        );
-                    }
-                    Err(_) => {}
-                }
-            }
-            Ok(())
-        }
-        _ => return Err(format!("Unexpected receiver state: {:?}", state).into()),
-    }
-}
-
-pub fn payjoin_receiver_check(
-    db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>,
-    descs: &[descriptors::SinglePathLianaDesc],
-    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
-) {
     let mut db_conn = db.connection();
     for (session_id, session) in db_conn.payjoin_get_all_receiver_sessions() {
         let SessionMetadata {
             status,
-            maybe_txid,
             maybe_bip21,
             ..
         } = session.metadata.clone();
 
         // No need to check Completed
         if status == PayjoinStatus::Completed {
-            continue;
+            return Ok(());
         }
 
         log::info!("[Payjoin] {:?}: bip21={:?}", status, maybe_bip21);
@@ -208,76 +305,52 @@ pub fn payjoin_receiver_check(
         let persister =
             ReceiverPersister::from_id(Arc::new(db.clone()), session_id.clone()).unwrap();
 
-        let (state, _) = replay_receiver_event_log(persister.clone())
+        let (state, history) = replay_receiver_event_log(persister.clone())
             .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))
             .unwrap();
 
-        match status {
-            PayjoinStatus::Pending => {
-                match process_receiver_session(session, state, persister, &mut db_conn, descs, secp)
-                {
-                    Ok(_) => (),
-                    Err(e) => log::warn!("receiver_check(): {}", e),
-                }
+        match state {
+            ReceiverState::WithContext(context) => {
+                read_from_directory(context, &persister, &mut db_conn, bit, descs, secp)?;
             }
-            PayjoinStatus::Signing => {
-                if let Some(txid) = maybe_txid {
-                    match db_conn.spend_tx(&txid) {
-                        Some(psbt) => {
-                            let mut is_signed = false;
-                            for psbtin in &psbt.inputs {
-                                if !psbtin.partial_sigs.is_empty() {
-                                    log::debug!("[Payjoin] PSBT is signed!");
-                                    is_signed = true;
-                                    break;
-                                }
-                            }
-
-                            if is_signed {
-                                match state {
-                                    ReceiverState::ProvisionalProposal(proposal) => {
-                                        let mut psbt = psbt.clone();
-                                        finalize_psbt(&mut psbt, secp);
-
-                                        let mut proposal = proposal
-                                            .finalize_proposal(
-                                                |_| Ok(psbt.clone()),
-                                                None,
-                                                Some(FeeRate::from_sat_per_vb(150).unwrap()),
-                                            )
-                                            .save(&persister)
-                                            .unwrap();
-
-                                        let (req, ctx) = proposal
-                                            .extract_req(OHTTP_RELAY)
-                                            .expect("Failed to extract request");
-
-                                        // Respond to sender
-                                        log::info!("[Payjoin] Receiver responding to sender...");
-                                        match post_request(req.clone()) {
-                                            Ok(resp) => {
-                                                proposal
-                                                    .process_res(resp.bytes().expect("Failed to read response").as_ref(), ctx)
-                                                    .save(&persister)
-                                                    .unwrap();
-
-                                                persister.update_metada(Some(PayjoinStatus::Completed), maybe_txid, Some(psbt), maybe_bip21);
-                                            },
-                                            Err(err) => log::error!(
-                                                "[Payjoin] payjoin_receiver_check(respond_to_sender): {} -> {}",
-                                                req.url, err
-                                            ),
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                        None => {}
-                    }
-                }
+            ReceiverState::UncheckedProposal(proposal) => {
+                check_proposal(proposal, &persister, &mut db_conn, bit, descs, secp)?;
             }
-            _ => {}
+            ReceiverState::MaybeInputsOwned(proposal) => {
+                check_inputs_not_owned(proposal, &persister, &mut db_conn, descs, secp)?;
+            }
+            ReceiverState::MaybeInputsSeen(proposal) => {
+                check_no_inputs_seen_before(proposal, &persister, &mut db_conn, descs, secp)?;
+            }
+            ReceiverState::OutputsUnknown(proposal) => {
+                identify_receiver_outputs(proposal, &persister, &mut db_conn, descs, secp)?;
+            }
+            ReceiverState::WantsOutputs(proposal) => {
+                commit_outputs(proposal, &persister, &mut db_conn, descs, secp)?;
+            }
+            ReceiverState::WantsInputs(proposal) => {
+                contribute_inputs(proposal, &persister, &mut db_conn, descs, secp)?
+            }
+            ReceiverState::ProvisionalProposal(proposal) => {
+                finalize_proposal(proposal, &persister, history, &mut db_conn, secp)?
+            }
+            ReceiverState::PayjoinProposal(proposal) => {
+                send_payjoin_proposal(proposal, &persister, history)?
+            }
+            _ => return Err(format!("Unexpected receiver state: {:?}", state).into()),
         }
+    }
+    Ok(())
+}
+
+pub fn payjoin_receiver_check(
+    db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>,
+    bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
+    descs: &[descriptors::SinglePathLianaDesc],
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) {
+    match process_receiver_session(db, bit, descs, secp) {
+        Ok(_) => (),
+        Err(e) => log::warn!("process_receiver_session(): {}", e),
     }
 }

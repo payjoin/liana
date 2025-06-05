@@ -407,7 +407,7 @@ pub fn poll(
     updates(&mut db_conn, bit, descs, secp);
     rescan_check(&mut db_conn, bit, descs, secp);
     payjoin_sender_check(db);
-    payjoin_receiver_check(db, descs, secp);
+    payjoin_receiver_check(db, bit, descs, secp);
     let now: u32 = time::SystemTime::now()
         .duration_since(time::UNIX_EPOCH)
         .expect("current system time must be later than epoch")

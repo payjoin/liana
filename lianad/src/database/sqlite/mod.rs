@@ -1029,9 +1029,9 @@ impl SqliteConn {
         )
         .expect("Db must not fail");
         if let Some(count) = count.first() {
-            return *count;
+            *count
         } else {
-            return 0;
+            0
         }
     }
 

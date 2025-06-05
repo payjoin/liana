@@ -24,10 +24,7 @@ fn get_proposed_payjoin_psbt(
     match post_request(req) {
         Ok(resp) => {
             let res = context
-                .process_response(
-                    &resp.bytes().expect("Failed to read response").as_ref(),
-                    ctx,
-                )
+                .process_response(resp.bytes().expect("Failed to read response").as_ref(), ctx)
                 .save(persister);
             match res {
                 Ok(OptionalTransitionOutcome::Progress(proposal)) => {
@@ -44,7 +41,7 @@ fn get_proposed_payjoin_psbt(
                 }
             }
         }
-        Err(e) => Err(e.into()),
+        Err(e) => Err(e),
     }
 }
 
@@ -57,14 +54,11 @@ fn post_orginal_proposal(
         Ok(resp) => {
             log::info!("[Payjoin] Posted original proposal...");
             sender
-                .process_response(
-                    &resp.bytes().expect("Failed to read response").as_ref(),
-                    ctx,
-                )
+                .process_response(resp.bytes().expect("Failed to read response").as_ref(), ctx)
                 .save(persister)?;
             Ok(())
         }
-        Err(e) => Err(e.into()),
+        Err(e) => Err(e),
     }
 }
 
@@ -79,7 +73,7 @@ fn process_sender_session(
                 Ok(_) => {}
                 Err(err) => log::warn!("post_orginal_proposal(): {}", err),
             }
-            return Ok(None);
+            Ok(None)
         }
         SenderState::V2GetContext(context) => {
             log::info!("[Payjoin] SenderState::V2GetContext");
@@ -91,9 +85,9 @@ fn process_sender_session(
                 "[Payjoin] SenderState::ProposalReceived: {}",
                 psbt.to_string()
             );
-            return Ok(Some(psbt.clone()));
+            Ok(Some(psbt.clone()))
         }
-        _ => return Err(format!("Unexpected sender state").into()),
+        _ => Err("Unexpected sender state".into()),
     }
 }
 
@@ -141,7 +135,7 @@ pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) 
                                     let mut input_without_sigs = psbt.inputs[index].clone();
                                     input_without_sigs.partial_sigs = Default::default();
                                     input_fields_to_restore
-                                        .insert(txin.previous_output.clone(), input_without_sigs);
+                                        .insert(txin.previous_output, input_without_sigs);
                                 }
                                 log::info!(
                                     "[Payjoin] Deleting original Payjoin psbt (txid={txid})"

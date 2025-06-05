@@ -145,6 +145,10 @@ impl BitcoinInterface for DummyBitcoind {
     fn mempool_entry(&self, _: &bitcoin::Txid) -> Option<MempoolEntry> {
         None
     }
+
+    fn test_mempool_accept(&self, _rawtxs: Vec<String>) -> Vec<bool> {
+        todo!()
+    }
 }
 
 struct DummyDbState {
@@ -614,11 +618,11 @@ impl DatabaseConnection for DummyDatabase {
     ) -> Vec<(SessionId, SessionWrapper<SenderSessionEvent>)> {
         todo!()
     }
-    
+
     fn payjoin_get_ohttp_keys(&mut self, _ohttp_relay: &str) -> Option<(u32, OhttpKeys)> {
         todo!()
     }
-    
+
     fn payjoin_save_ohttp_keys(&mut self, _ohttp_relay: &str, _ohttp_keys: payjoin::OhttpKeys) {
         todo!()
     }

@@ -63,7 +63,7 @@ pub fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::Ver
     let mut inputs_to_finalize = vec![];
     for (index, input) in psbt.inputs.iter_mut().enumerate() {
         if input.witness_utxo.is_none() {
-            // finalize_proposal() cleans this up, but we need it to finalize_inp_mut() bellow
+            // Sender's wallet cleans this up (from original PSBT) but we need it to finalize_inp_mut() bellow
             input.witness_utxo = Some(TxOut {
                 value: Amount::ZERO,
                 script_pubkey: ScriptBuf::default(),
@@ -81,7 +81,7 @@ pub fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::Ver
     }
 
     for index in inputs_to_finalize {
-        match psbt.finalize_inp_mut(&secp, index) {
+        match psbt.finalize_inp_mut(secp, index) {
             Ok(_) => log::info!("[Payjoin] Finalizing input at: {}", index),
             Err(e) => log::warn!("[Payjoin] Failed to finalize input at: {} | {}", index, e),
         }

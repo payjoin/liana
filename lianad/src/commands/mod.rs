@@ -424,7 +424,7 @@ impl DaemonControl {
         let uri = uri.assume_checked();
         let uri = uri
             .check_pj_supported()
-            .map_err(|_| format!("URI does not support Payjoin"))
+            .map_err(|_| "URI does not support Payjoin".to_string())
             .unwrap();
 
         let mut psbt = psbt.clone();

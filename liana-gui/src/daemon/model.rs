@@ -205,18 +205,15 @@ impl SpendTx {
 
         // TODO(arturgontijo): We should count the sigs, just in case.
         if let Some(payjoin_info) = &self.payjoin_info {
-            match payjoin_info.sender_status {
-                Some(PayjoinStatus::Completed) => {
-                    let has_sigs = self
-                        .psbt
-                        .inputs
-                        .iter()
-                        .any(|psbtin| !psbtin.partial_sigs.is_empty());
-                    if has_sigs {
-                        return Some(path);
-                    }
+            if let Some(PayjoinStatus::Completed) = payjoin_info.sender_status {
+                let has_sigs = self
+                    .psbt
+                    .inputs
+                    .iter()
+                    .any(|psbtin| !psbtin.partial_sigs.is_empty());
+                if has_sigs {
+                    return Some(path);
                 }
-                _ => {}
             }
         };
 

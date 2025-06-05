@@ -3,6 +3,7 @@ use payjoin::persist::SessionPersister;
 use payjoin::receive::v2::ReceiverSessionEvent;
 use payjoin::send::v2::SenderSessionEvent;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -61,7 +62,7 @@ pub struct ReceiverPersister {
 }
 
 impl ReceiverPersister {
-    pub fn new(db: Arc<dyn DatabaseInterface>) -> Result<Self, ()> {
+    pub fn new(db: Arc<dyn DatabaseInterface>) -> Result<Self, Box<dyn Error>> {
         let mut db_conn = db.connection();
         let session_id = SessionId::new(db_conn.payjoin_next_id("payjoin_receivers"));
         let session: SessionWrapper<ReceiverSessionEvent> = SessionWrapper {
@@ -78,7 +79,7 @@ impl ReceiverPersister {
         Ok(Self { db, session_id })
     }
 
-    pub fn from_id(db: Arc<dyn DatabaseInterface>, id: SessionId) -> Result<Self, ()> {
+    pub fn from_id(db: Arc<dyn DatabaseInterface>, id: SessionId) -> Result<Self, Box<dyn Error>> {
         Ok(Self { db, session_id: id })
     }
 
@@ -148,7 +149,7 @@ pub struct SenderPersister {
 }
 
 impl SenderPersister {
-    pub fn new(db: Arc<dyn DatabaseInterface>) -> Result<Self, ()> {
+    pub fn new(db: Arc<dyn DatabaseInterface>) -> Result<Self, Box<dyn Error>> {
         let mut db_conn = db.connection();
         let session_id = SessionId::new(db_conn.payjoin_next_id("payjoin_senders"));
         let session: SessionWrapper<SenderSessionEvent> = SessionWrapper {
@@ -165,7 +166,7 @@ impl SenderPersister {
         Ok(Self { db, session_id })
     }
 
-    pub fn from_id(db: Arc<dyn DatabaseInterface>, id: SessionId) -> Result<Self, ()> {
+    pub fn from_id(db: Arc<dyn DatabaseInterface>, id: SessionId) -> Result<Self, Box<dyn Error>> {
         Ok(Self { db, session_id: id })
     }
 

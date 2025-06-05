@@ -967,7 +967,7 @@ impl Step for SaveSpend {
     fn load(&mut self, _coins: &[Coin], _tip_height: i32, draft: &TransactionDraft) {
         let (psbt, warnings) = draft.generated.clone().unwrap();
 
-        let bip21 = draft.recipients.get(0).unwrap().bip21.value.clone();
+        let bip21 = draft.recipients.first().unwrap().bip21.value.clone();
         let payjoin_info = if bip21.is_empty() {
             None
         } else {
