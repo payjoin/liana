@@ -10,6 +10,7 @@ use crate::{
     miniscript::bitcoin::absolute::LockTime,
     payjoin::{
         db::{ReceiverPersister, SenderPersister, SessionMetadata},
+        helpers::fetch_ohttp_keys,
         types::{PayjoinInfo, PayjoinStatus},
     },
     poller::PollerMessage,
@@ -51,7 +52,7 @@ use payjoin::{
     bitcoin::{key::Secp256k1, FeeRate, Txid},
     receive::v2::{Receiver, UninitializedReceiver},
     send::v2::SenderBuilder,
-    OhttpKeys, Uri, UriExt, Url,
+    Uri, UriExt,
 };
 use serde::{Deserialize, Serialize};
 
@@ -372,8 +373,24 @@ impl DaemonControl {
         GetAddressResult::new(address, new_index, "".to_string())
     }
 
-    pub fn receive_payjoin(&self, directory: Url, ohttp_keys: OhttpKeys) -> GetAddressResult {
+    pub fn receive_payjoin(&self) -> GetAddressResult {
         let mut db_conn = self.db.connection();
+
+        // TODO(arturgontijo): Fetch these from DB (via GUI's Settings Panel)
+        let ohttp_relay: &str = "https://pj.bobspacebkk.com";
+        let directory = "https://payjo.in";
+
+        let ohttp_keys = if let Some(entry) = db_conn.payjoin_get_ohttp_keys(ohttp_relay) {
+            entry.1
+        } else {
+            let ohttp_keys = std::thread::spawn(move || fetch_ohttp_keys(ohttp_relay, directory))
+                .join()
+                .unwrap()
+                .unwrap();
+            db_conn.payjoin_save_ohttp_keys(ohttp_relay, ohttp_keys.clone());
+            ohttp_keys
+        };
+
         let index = db_conn.receive_index();
         let new_index = index
             .increment()
@@ -389,18 +406,14 @@ impl DaemonControl {
         let persister = ReceiverPersister::new(Arc::new(self.db.clone())).unwrap();
         let session = Receiver::<UninitializedReceiver>::create_session(
             address.clone(),
-            directory.clone(),
+            directory,
             ohttp_keys.clone(),
             None,
         )
         .save(&persister)
         .unwrap();
 
-        let mut payjoin_uri = session.pj_uri();
-        // HACK: hardcoded amount for now
-        payjoin_uri.amount = Some(bitcoin::Amount::from_sat(10_000));
-
-        GetAddressResult::new(address, new_index, payjoin_uri.to_string())
+        GetAddressResult::new(address, new_index, session.pj_uri().to_string())
     }
 
     /// Initiate a payjoin sender

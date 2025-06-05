@@ -123,6 +123,14 @@ CREATE TABLE labels (
     value TEXT NOT NULL
 );
 
+/* Payjoin OHttpKeys */
+CREATE TABLE payjoin_ohttp_keys (
+    id INTEGER PRIMARY KEY NOT NULL,
+    relay TEXT UNIQUE NOT NULL,
+    timestamp INTEGER NOT NULL,
+    keys BLOB NOT NULL
+);
+
 /* Payjoin senders */
 CREATE TABLE payjoin_senders (
     id INTEGER PRIMARY KEY NOT NULL,

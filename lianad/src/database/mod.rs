@@ -23,7 +23,7 @@ use std::{
 
 use bip329::Labels;
 use miniscript::bitcoin::{self, bip32, psbt::Psbt, secp256k1, Address, Network, OutPoint, Txid};
-use payjoin::{receive::v2::ReceiverSessionEvent, send::v2::SenderSessionEvent};
+use payjoin::{receive::v2::ReceiverSessionEvent, send::v2::SenderSessionEvent, OhttpKeys};
 
 /// Information about the wallet.
 ///
@@ -198,6 +198,12 @@ pub trait DatabaseConnection {
     fn get_labels_bip329(&mut self, offset: u32, limit: u32) -> Labels;
 
     /// Payjoin
+
+    /// Get the next Session Id
+    fn payjoin_get_ohttp_keys(&mut self, ohttp_relay: &str) -> Option<(u32, OhttpKeys)>;
+
+    /// Save OHttpKeys
+    fn payjoin_save_ohttp_keys(&mut self, ohttp_relay: &str, ohttp_keys: OhttpKeys);
 
     /// Get the next Session Id
     fn payjoin_next_id(&mut self, table: &str) -> u64;
@@ -473,6 +479,14 @@ impl DatabaseConnection for SqliteConn {
                 )
             })
             .collect()
+    }
+
+    fn payjoin_get_ohttp_keys(&mut self, ohttp_relay: &str) -> Option<(u32, OhttpKeys)> {
+        self.payjoin_get_ohttp_keys(ohttp_relay)
+    }
+
+    fn payjoin_save_ohttp_keys(&mut self, ohttp_relay: &str, ohttp_keys: OhttpKeys) {
+        self.payjoin_save_ohttp_keys(ohttp_relay, ohttp_keys)
     }
 
     fn payjoin_next_id(&mut self, table: &str) -> u64 {

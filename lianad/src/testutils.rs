@@ -9,7 +9,7 @@ use crate::{
     DaemonControl, DaemonHandle,
 };
 use liana::descriptors;
-use payjoin::{receive::v2::ReceiverSessionEvent, send::v2::SenderSessionEvent};
+use payjoin::{receive::v2::ReceiverSessionEvent, send::v2::SenderSessionEvent, OhttpKeys};
 
 use std::convert::TryInto;
 use std::{
@@ -612,6 +612,14 @@ impl DatabaseConnection for DummyDatabase {
     fn payjoin_get_all_sender_sessions(
         &mut self,
     ) -> Vec<(SessionId, SessionWrapper<SenderSessionEvent>)> {
+        todo!()
+    }
+    
+    fn payjoin_get_ohttp_keys(&mut self, _ohttp_relay: &str) -> Option<(u32, OhttpKeys)> {
+        todo!()
+    }
+    
+    fn payjoin_save_ohttp_keys(&mut self, _ohttp_relay: &str, _ohttp_keys: payjoin::OhttpKeys) {
         todo!()
     }
 }

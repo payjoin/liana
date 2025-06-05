@@ -5,12 +5,43 @@ use miniscript::{
     psbt::PsbtExt,
 };
 
-use payjoin::bitcoin::Amount;
+use payjoin::{bitcoin::Amount, IntoUrl, OhttpKeys};
+use reqwest::{header::ACCEPT, Proxy};
 
 pub const OHTTP_RELAY: &str = "https://pj.bobspacebkk.com";
 
 pub fn http_agent() -> reqwest::blocking::Client {
     reqwest::blocking::Client::new()
+}
+
+pub fn fetch_ohttp_keys(
+    ohttp_relay: impl IntoUrl,
+    payjoin_directory: impl IntoUrl,
+) -> Result<OhttpKeys, Box<dyn Error + Send + Sync>> {
+    let ohttp_keys_url = payjoin_directory
+        .into_url()?
+        .join("/.well-known/ohttp-gateway")?;
+    let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
+    let client = reqwest::blocking::Client::builder().proxy(proxy).build()?;
+    let res = client
+        .get(ohttp_keys_url)
+        .header(ACCEPT, "application/ohttp-keys")
+        .send()?;
+    parse_ohttp_keys_response(res)
+}
+
+fn parse_ohttp_keys_response(
+    res: reqwest::blocking::Response,
+) -> Result<OhttpKeys, Box<dyn Error + Send + Sync>> {
+    if !res.status().is_success() {
+        return Err(format!("UnexpectedStatusCode: {}", res.status()).into());
+    }
+
+    let body = res.bytes().unwrap().to_vec();
+    match OhttpKeys::decode(&body) {
+        Ok(ohttp_keys) => Ok(ohttp_keys),
+        Err(err) => Err(format!("InvalidOhttpKeys: {}", err).into()),
+    }
 }
 
 pub fn post_request(req: payjoin::Request) -> Result<reqwest::blocking::Response, Box<dyn Error>> {

@@ -24,7 +24,6 @@ use lianad::{
     config::Config,
     StartupError,
 };
-use payjoin::{OhttpKeys, Url};
 
 use crate::{hw::HardwareWalletConfig, node};
 
@@ -116,11 +115,7 @@ pub trait Daemon: Debug {
         limit: usize,
         start_index: Option<ChildNumber>,
     ) -> Result<model::ListRevealedAddressesResult, DaemonError>;
-    async fn receive_payjoin(
-        &self,
-        directory: Url,
-        ohttp_keys: OhttpKeys,
-    ) -> Result<model::GetAddressResult, DaemonError>;
+    async fn receive_payjoin(&self) -> Result<model::GetAddressResult, DaemonError>;
     async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError>;
     async fn get_payjoin_info(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError>;
     async fn update_deriv_indexes(
@@ -411,6 +406,7 @@ pub trait Daemon: Debug {
     /// Reimplemented by LianaLite backend
     async fn update_wallet_metadata(
         &self,
+        _wallet_alias: Option<String>,
         _fingerprint_aliases: &HashMap<Fingerprint, String>,
         _hws: &[HardwareWalletConfig],
     ) -> Result<(), DaemonError> {

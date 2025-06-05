@@ -19,7 +19,6 @@ use lianad::{
     config::Config,
     payjoin::types::PayjoinInfo,
 };
-use payjoin::{OhttpKeys, Url};
 use reqwest::{Error, IntoUrl, Method, RequestBuilder, Response};
 use tokio::sync::RwLock;
 
@@ -625,11 +624,7 @@ impl Daemon for BackendWalletClient {
         })
     }
 
-    async fn receive_payjoin(
-        &self,
-        _directory: Url,
-        _ohttp_keys: OhttpKeys,
-    ) -> Result<GetAddressResult, DaemonError> {
+    async fn receive_payjoin(&self) -> Result<GetAddressResult, DaemonError> {
         unimplemented!()
     }
 
@@ -1316,6 +1311,7 @@ fn spend_tx_from_api(
         desc,
         secp,
         network,
+        None,
     );
     tx.load_labels(&labels);
     tx

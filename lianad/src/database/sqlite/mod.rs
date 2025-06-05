@@ -28,7 +28,7 @@ use crate::{
     payjoin::db::{SessionId, SessionWrapper},
 };
 use liana::descriptors::LianaDescriptor;
-use payjoin::{receive::v2::ReceiverSessionEvent, send::v2::SenderSessionEvent};
+use payjoin::{receive::v2::ReceiverSessionEvent, send::v2::SenderSessionEvent, OhttpKeys};
 
 use std::{
     cmp,
@@ -960,6 +960,56 @@ impl SqliteConn {
             db_tx.execute(
                 "UPDATE tip SET blockheight = (?1), blockhash = (?2)",
                 rusqlite::params![new_tip.height, new_tip.hash[..].to_vec()],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    /// Fetch Payjoin OHttpKeys and their timestamp
+    pub fn payjoin_get_ohttp_keys(&mut self, ohttp_relay: &str) -> Option<(u32, OhttpKeys)> {
+        let entries = db_query(
+            &mut self.conn,
+            "SELECT timestamp, keys FROM payjoin_ohttp_keys WHERE relay = ?1 ORDER BY timestamp DESC LIMIT 1",
+            rusqlite::params![ohttp_relay],
+            |row| {
+                let timestamp: u32 = row.get(0)?;
+                let ohttp_keys_ser: Vec<u8> = row.get(1)?;
+                let ohttp_keys = OhttpKeys::decode(&ohttp_keys_ser).unwrap();
+                Ok((timestamp, ohttp_keys))
+            },
+        )
+        .expect("Db must not fail");
+
+        // Check timestamp (7-days)
+        if let Some(entry) = entries.first().cloned() {
+            let now = curr_timestamp();
+            let seven_days_ago = now.saturating_sub(7 * 24 * 60 * 60);
+            if entry.0 < seven_days_ago {
+                // Delete entry
+                db_exec(&mut self.conn, |db_tx| {
+                    db_tx.execute(
+                        "DELETE FROM payjoin_ohttp_keys WHERE relay = ?1",
+                        rusqlite::params![ohttp_relay],
+                    )?;
+                    Ok(())
+                })
+                .expect("Db must not fail");
+                return None;
+            } else {
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    /// Store new OHttpKeys with timestamp
+    pub fn payjoin_save_ohttp_keys(&mut self, ohttp_relay: &str, ohttp_keys: OhttpKeys) {
+        let ohttp_keys_ser = ohttp_keys.encode().unwrap();
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "INSERT INTO payjoin_ohttp_keys (relay, timestamp, keys) VALUES (?1, ?2, ?3)",
+                rusqlite::params![ohttp_relay, curr_timestamp(), ohttp_keys_ser],
             )?;
             Ok(())
         })

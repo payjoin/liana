@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use lianad::bip329::Labels;
 use lianad::commands::{GetLabelsBip329Result, UpdateDerivIndexesResult};
 use lianad::payjoin::types::PayjoinInfo;
-use payjoin::{OhttpKeys, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -109,11 +108,7 @@ impl<C: Client + Send + Sync + Debug> Daemon for Lianad<C> {
         )
     }
 
-    async fn receive_payjoin(
-        &self,
-        _directory: Url,
-        _ohttp_keys: OhttpKeys,
-    ) -> Result<GetAddressResult, DaemonError> {
+    async fn receive_payjoin(&self) -> Result<GetAddressResult, DaemonError> {
         unimplemented!()
     }
 

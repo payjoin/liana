@@ -7,8 +7,6 @@ use liana::miniscript::bitcoin::{
     Address, Network,
 };
 use liana_ui::{component::modal, widget::*};
-use payjoin::io::fetch_ohttp_keys;
-use payjoin::{OhttpKeys, Url};
 
 use crate::daemon::model::LabelsLoader;
 use crate::dir::LianaDirectory;
@@ -64,12 +62,6 @@ impl Labelled for Addresses {
     }
 }
 
-#[derive(Clone, Debug)]
-struct PayjoinSpecs {
-    directory: Url,
-    ohttp_keys: OhttpKeys,
-}
-
 pub struct ReceivePanel {
     data_dir: LianaDirectory,
     wallet: Arc<Wallet>,
@@ -82,17 +74,10 @@ pub struct ReceivePanel {
     modal: Modal,
     warning: Option<Error>,
     processing: bool,
-    payjoin_specs: PayjoinSpecs,
 }
 
 impl ReceivePanel {
     pub fn new(data_dir: LianaDirectory, wallet: Arc<Wallet>) -> Self {
-        let ohttp_relay = Url::parse("https://pj.bobspacebkk.com").unwrap();
-        let directory = Url::parse("https://payjo.in").unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let ohttp_keys = rt
-            .block_on(async { fetch_ohttp_keys(ohttp_relay.clone(), directory.clone()).await })
-            .unwrap();
         Self {
             data_dir,
             wallet,
@@ -105,10 +90,6 @@ impl ReceivePanel {
             modal: Modal::None,
             warning: None,
             processing: false,
-            payjoin_specs: PayjoinSpecs {
-                directory,
-                ohttp_keys,
-            },
         }
     }
 
@@ -320,11 +301,10 @@ impl State for ReceivePanel {
             }
             Message::View(view::Message::PayjoinInitiate) => {
                 let daemon = daemon.clone();
-                let payjoin_specs = self.payjoin_specs.clone();
                 Task::perform(
                     async move {
                         daemon
-                            .receive_payjoin(payjoin_specs.directory, payjoin_specs.ohttp_keys)
+                            .receive_payjoin()
                             .await
                             .map(|res| (res.address, res.derivation_index, res.payjoin_uri))
                             .map_err(|e| e.into())
