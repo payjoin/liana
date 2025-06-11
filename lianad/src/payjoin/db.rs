@@ -83,7 +83,7 @@ impl ReceiverPersister {
         Ok(Self { db, session_id: id })
     }
 
-    pub fn update_metada(
+    pub fn update_metadata(
         &self,
         status: Option<PayjoinStatus>,
         maybe_txid: Option<Txid>,
@@ -170,7 +170,7 @@ impl SenderPersister {
         Ok(Self { db, session_id: id })
     }
 
-    pub fn update_metada(
+    pub fn update_metadata(
         &self,
         status: Option<PayjoinStatus>,
         maybe_txid: Option<Txid>,

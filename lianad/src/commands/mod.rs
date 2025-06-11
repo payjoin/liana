@@ -436,7 +436,7 @@ impl DaemonControl {
             .save(&persister)
             .unwrap();
 
-        persister.update_metada(
+        persister.update_metadata(
             Some(PayjoinStatus::Pending),
             Some(psbt.unsigned_tx.compute_txid()),
             Some(psbt.clone()),

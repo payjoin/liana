@@ -967,11 +967,11 @@ impl SqliteConn {
     }
 
     /// Fetch Payjoin OHttpKeys and their timestamp
-    pub fn payjoin_get_ohttp_keys(&mut self, ohttp_relay: &str) -> Option<(u32, OhttpKeys)> {
+    pub fn payjoin_get_ohttp_keys(&mut self, relay_url: &str) -> Option<(u32, OhttpKeys)> {
         let entries = db_query(
             &mut self.conn,
-            "SELECT timestamp, keys FROM payjoin_ohttp_keys WHERE relay = ?1 ORDER BY timestamp DESC LIMIT 1",
-            rusqlite::params![ohttp_relay],
+            "SELECT timestamp, key FROM payjoin_ohttp_keys WHERE relay_url = ?1 ORDER BY timestamp DESC LIMIT 1",
+            rusqlite::params![relay_url],
             |row| {
                 let timestamp: u32 = row.get(0)?;
                 let ohttp_keys_ser: Vec<u8> = row.get(1)?;
@@ -989,8 +989,8 @@ impl SqliteConn {
                 // Delete entry
                 db_exec(&mut self.conn, |db_tx| {
                     db_tx.execute(
-                        "DELETE FROM payjoin_ohttp_keys WHERE relay = ?1",
-                        rusqlite::params![ohttp_relay],
+                        "DELETE FROM payjoin_ohttp_keys WHERE relay_url = ?1",
+                        rusqlite::params![relay_url],
                     )?;
                     Ok(())
                 })
@@ -1004,12 +1004,12 @@ impl SqliteConn {
     }
 
     /// Store new OHttpKeys with timestamp
-    pub fn payjoin_save_ohttp_keys(&mut self, ohttp_relay: &str, ohttp_keys: OhttpKeys) {
+    pub fn payjoin_save_ohttp_keys(&mut self, relay_url: &str, ohttp_keys: OhttpKeys) {
         let ohttp_keys_ser = ohttp_keys.encode().unwrap();
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_ohttp_keys (relay, timestamp, keys) VALUES (?1, ?2, ?3)",
-                rusqlite::params![ohttp_relay, curr_timestamp(), ohttp_keys_ser],
+                "INSERT INTO payjoin_ohttp_keys (relay_url, timestamp, key) VALUES (?1, ?2, ?3)",
+                rusqlite::params![relay_url, curr_timestamp(), ohttp_keys_ser],
             )?;
             Ok(())
         })

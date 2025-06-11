@@ -201,7 +201,7 @@ fn contribute_inputs(
     db_conn.store_spend(&psbt);
     log::info!("[Payjoin] PSBT in the DB...");
 
-    persister.update_metada(
+    persister.update_metadata(
         Some(PayjoinStatus::Signing),
         Some(psbt.unsigned_tx.compute_txid()),
         Some(psbt.clone()),
@@ -269,7 +269,7 @@ fn send_payjoin_proposal(
                 .save(persister)?;
 
             let bip21 = history.pj_uri().unwrap();
-            persister.update_metada(
+            persister.update_metadata(
                 Some(PayjoinStatus::Completed),
                 Some(txid),
                 Some(psbt),

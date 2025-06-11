@@ -116,7 +116,7 @@ pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) 
 
         match status {
             PayjoinStatus::Pending => match process_sender_session(state, &persister) {
-                Ok(_) => persister.update_metada(
+                Ok(_) => persister.update_metadata(
                     Some(PayjoinStatus::WaitingReceiver),
                     maybe_txid,
                     maybe_psbt,
@@ -159,7 +159,7 @@ pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) 
                                 );
                                 db_conn.store_spend(&new_psbt);
 
-                                persister.update_metada(
+                                persister.update_metadata(
                                     Some(PayjoinStatus::Completed),
                                     Some(new_txid),
                                     Some(new_psbt),
