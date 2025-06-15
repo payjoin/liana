@@ -8,7 +8,8 @@ use liana::descriptors;
 
 use payjoin::{
     bitcoin::{
-        consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence, TxIn,
+        consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence,
+        TxIn, Weight,
     },
     persist::OptionalTransitionOutcome,
     receive::{
@@ -37,7 +38,7 @@ fn read_from_directory(
     persister: &ReceiverPersister,
     db_conn: &mut Box<dyn DatabaseConnection>,
     bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
-    descs: &[descriptors::SinglePathLianaDesc],
+    desc: &descriptors::LianaDescriptor,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let mut receiver = receiver;
@@ -65,7 +66,7 @@ fn read_from_directory(
         }
         Err(e) => return Err(e),
     };
-    check_proposal(proposal, persister, db_conn, bit, descs, secp)
+    check_proposal(proposal, persister, db_conn, bit, desc, secp)
 }
 
 fn check_proposal(
@@ -73,7 +74,7 @@ fn check_proposal(
     persister: &ReceiverPersister,
     db_conn: &mut Box<dyn DatabaseConnection>,
     bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
-    descs: &[descriptors::SinglePathLianaDesc],
+    desc: &descriptors::LianaDescriptor,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     // Receive Check 1: Can Broadcast
@@ -86,64 +87,64 @@ fn check_proposal(
             }
         })
         .save(persister)?;
-    check_inputs_not_owned(proposal, persister, db_conn, descs, secp)
+    check_inputs_not_owned(proposal, persister, db_conn, desc, secp)
 }
 
 fn check_inputs_not_owned(
     proposal: Receiver<MaybeInputsOwned>,
     persister: &ReceiverPersister,
     db_conn: &mut Box<dyn DatabaseConnection>,
-    descs: &[descriptors::SinglePathLianaDesc],
+    desc: &descriptors::LianaDescriptor,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal
         .check_inputs_not_owned(|_| Ok(false))
         .save(persister)?;
-    check_no_inputs_seen_before(proposal, persister, db_conn, descs, secp)
+    check_no_inputs_seen_before(proposal, persister, db_conn, desc, secp)
 }
 
 fn check_no_inputs_seen_before(
     proposal: Receiver<MaybeInputsSeen>,
     persister: &ReceiverPersister,
     db_conn: &mut Box<dyn DatabaseConnection>,
-    descs: &[descriptors::SinglePathLianaDesc],
+    desc: &descriptors::LianaDescriptor,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal
         .check_no_inputs_seen_before(|_| Ok(false))
         .save(persister)?;
-    identify_receiver_outputs(proposal, persister, db_conn, descs, secp)
+    identify_receiver_outputs(proposal, persister, db_conn, desc, secp)
 }
 
 fn identify_receiver_outputs(
     proposal: Receiver<OutputsUnknown>,
     persister: &ReceiverPersister,
     db_conn: &mut Box<dyn DatabaseConnection>,
-    descs: &[descriptors::SinglePathLianaDesc],
+    desc: &descriptors::LianaDescriptor,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal
         .identify_receiver_outputs(|_| Ok(true))
         .save(persister)?;
-    commit_outputs(proposal, persister, db_conn, descs, secp)
+    commit_outputs(proposal, persister, db_conn, desc, secp)
 }
 
 fn commit_outputs(
     proposal: Receiver<WantsOutputs>,
     persister: &ReceiverPersister,
     db_conn: &mut Box<dyn DatabaseConnection>,
-    descs: &[descriptors::SinglePathLianaDesc],
+    desc: &descriptors::LianaDescriptor,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal.commit_outputs().save(persister)?;
-    contribute_inputs(proposal, persister, db_conn, descs, secp)
+    contribute_inputs(proposal, persister, db_conn, desc, secp)
 }
 
 fn contribute_inputs(
     proposal: Receiver<WantsInputs>,
     persister: &ReceiverPersister,
     db_conn: &mut Box<dyn DatabaseConnection>,
-    descs: &[descriptors::SinglePathLianaDesc],
+    desc: &descriptors::LianaDescriptor,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let coins = db_conn.coins(&[CoinStatus::Confirmed], &[]);
@@ -157,10 +158,11 @@ fn contribute_inputs(
 
         let txout = tx.tx_out(outpoint.vout as usize)?.clone();
 
-        let receiver_derived_desc = if coin.is_change {
-            descs[1].derive(coin.derivation_index, secp)
+        let derived_desc = if coin.is_change {
+            desc.change_descriptor().derive(coin.derivation_index, secp)
         } else {
-            descs[0].derive(coin.derivation_index, secp)
+            desc.receive_descriptor()
+                .derive(coin.derivation_index, secp)
         };
 
         let txin = TxIn {
@@ -175,7 +177,7 @@ fn contribute_inputs(
             ..Default::default()
         };
 
-        receiver_derived_desc.update_psbt_in(&mut psbtin);
+        derived_desc.update_psbt_in(&mut psbtin);
 
         candidate_inputs_map.insert(*outpoint, (*coin, txin, psbtin));
     }
@@ -187,7 +189,10 @@ fn contribute_inputs(
     let selected_input = proposal.try_preserving_privacy(candidate_inputs).unwrap();
 
     proposal
-        .contribute_inputs(vec![selected_input])?
+        .contribute_inputs_with_weights(
+            vec![selected_input],
+            vec![Weight::from_wu_usize(desc.max_sat_weight(true))],
+        )?
         .commit_inputs()
         .save(persister)?;
 
@@ -284,7 +289,7 @@ fn send_payjoin_proposal(
 fn process_receiver_session(
     db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>,
     bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
-    descs: &[descriptors::SinglePathLianaDesc],
+    desc: &descriptors::LianaDescriptor,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let mut db_conn = db.connection();
@@ -311,25 +316,25 @@ fn process_receiver_session(
 
         match state {
             ReceiverState::WithContext(context) => {
-                read_from_directory(context, &persister, &mut db_conn, bit, descs, secp)?;
+                read_from_directory(context, &persister, &mut db_conn, bit, desc, secp)?;
             }
             ReceiverState::UncheckedProposal(proposal) => {
-                check_proposal(proposal, &persister, &mut db_conn, bit, descs, secp)?;
+                check_proposal(proposal, &persister, &mut db_conn, bit, desc, secp)?;
             }
             ReceiverState::MaybeInputsOwned(proposal) => {
-                check_inputs_not_owned(proposal, &persister, &mut db_conn, descs, secp)?;
+                check_inputs_not_owned(proposal, &persister, &mut db_conn, desc, secp)?;
             }
             ReceiverState::MaybeInputsSeen(proposal) => {
-                check_no_inputs_seen_before(proposal, &persister, &mut db_conn, descs, secp)?;
+                check_no_inputs_seen_before(proposal, &persister, &mut db_conn, desc, secp)?;
             }
             ReceiverState::OutputsUnknown(proposal) => {
-                identify_receiver_outputs(proposal, &persister, &mut db_conn, descs, secp)?;
+                identify_receiver_outputs(proposal, &persister, &mut db_conn, desc, secp)?;
             }
             ReceiverState::WantsOutputs(proposal) => {
-                commit_outputs(proposal, &persister, &mut db_conn, descs, secp)?;
+                commit_outputs(proposal, &persister, &mut db_conn, desc, secp)?;
             }
             ReceiverState::WantsInputs(proposal) => {
-                contribute_inputs(proposal, &persister, &mut db_conn, descs, secp)?
+                contribute_inputs(proposal, &persister, &mut db_conn, desc, secp)?
             }
             ReceiverState::ProvisionalProposal(proposal) => {
                 finalize_proposal(proposal, &persister, history, &mut db_conn, secp)?
@@ -346,10 +351,10 @@ fn process_receiver_session(
 pub fn payjoin_receiver_check(
     db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>,
     bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
-    descs: &[descriptors::SinglePathLianaDesc],
+    desc: &descriptors::LianaDescriptor,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) {
-    match process_receiver_session(db, bit, descs, secp) {
+    match process_receiver_session(db, bit, desc, secp) {
         Ok(_) => (),
         Err(e) => log::warn!("process_receiver_session(): {}", e),
     }

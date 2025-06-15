@@ -4285,6 +4285,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 [[package]]
 name = "payjoin"
 version = "0.23.0"
+source = "git+https://github.com/arturgontijo/rust-payjoin.git?branch=session-event-log-sketch#ca37d0fe7c1d9d7a3d24f4b5e34183bc13232b64"
 dependencies = [
  "bhttp",
  "bitcoin",
