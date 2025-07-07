@@ -55,7 +55,7 @@ rust-ini = "0.19.0"
 rfd = "0.15.1"
 
 # Payjoin
-payjoin = { git = "https://github.com/arturgontijo/rust-payjoin.git", branch = "session-event-log-sketch", features = ["v2", "io"] }
+payjoin = { git = "https://github.com/arturgontijo/rust-payjoin.git", branch = "p2wsh-fix", features = ["v2", "io"] }
 
 [target.'cfg(windows)'.dependencies]
 zip = { version = "0.6", default-features=false, features = ["bzip2", "deflate"] }

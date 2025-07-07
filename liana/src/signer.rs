@@ -366,20 +366,13 @@ impl HotSigner {
         let master_fingerprint = self.fingerprint(secp);
         let mut sighash_cache = sighash::SighashCache::new(&psbt.unsigned_tx);
 
-        // TODO(arturgontijo): my_prevouts (my psbt.inputs only)
         let prevouts: Vec<_> = psbt
             .inputs
             .iter()
             .filter_map(|psbt_in| psbt_in.witness_utxo.clone())
             .collect();
         if prevouts.len() != psbt.inputs.len() {
-            // TODO(arturgontijo): Skip for now...
-            log::warn!(
-                "Not throwing SignerError::IncompletePsbt: prevouts.len({}) != psbt.inputs.len({})",
-                prevouts.len(),
-                psbt.inputs.len()
-            );
-            // return Err(SignerError::IncompletePsbt);
+            return Err(SignerError::IncompletePsbt);
         }
 
         // Sign each input in the PSBT.

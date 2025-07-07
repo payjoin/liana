@@ -9,14 +9,13 @@ use liana::descriptors;
 use payjoin::{
     bitcoin::{
         consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence,
-        TxIn, Weight,
+        TxIn,
     },
     persist::OptionalTransitionOutcome,
     receive::{
         v2::{
-            replay_receiver_event_log, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown,
-            PayjoinProposal, ProvisionalProposal, Receiver, ReceiverState, ReceiverWithContext,
-            SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs,
+            replay_event_log, Initialized, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal,
+            ReceiveSession, Receiver, SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs
         },
         InputPair,
     },
@@ -34,7 +33,7 @@ use crate::{
 use super::{db::ReceiverPersister, types::PayjoinStatus};
 
 fn read_from_directory(
-    receiver: Receiver<ReceiverWithContext>,
+    receiver: Receiver<Initialized>,
     persister: &ReceiverPersister,
     db_conn: &mut Box<dyn DatabaseConnection>,
     bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
@@ -189,14 +188,11 @@ fn contribute_inputs(
     let selected_input = proposal.try_preserving_privacy(candidate_inputs).unwrap();
 
     proposal
-        .contribute_inputs_with_weights(
-            vec![selected_input],
-            vec![Weight::from_wu_usize(desc.max_sat_weight(true))],
-        )?
+        .contribute_inputs(vec![selected_input])?
         .commit_inputs()
         .save(persister)?;
 
-    let (_, history) = replay_receiver_event_log(persister.clone())
+    let (_, history) = replay_event_log(persister)
         .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))
         .unwrap();
 
@@ -223,7 +219,8 @@ fn finalize_proposal(
     db_conn: &mut Box<dyn DatabaseConnection>,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
-    if let Some(txid) = history.proposal_txid() {
+    if let Some(proposed_psbt) = history.psbt_with_contributed_inputs() {
+        let txid = proposed_psbt.unsigned_tx.compute_txid();
         if let Some(psbt) = db_conn.spend_tx(&txid) {
             let mut is_signed = false;
             for psbtin in &psbt.inputs {
@@ -310,36 +307,36 @@ fn process_receiver_session(
         let persister =
             ReceiverPersister::from_id(Arc::new(db.clone()), session_id.clone()).unwrap();
 
-        let (state, history) = replay_receiver_event_log(persister.clone())
+        let (state, history) = replay_event_log(&persister)
             .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))
             .unwrap();
 
         match state {
-            ReceiverState::WithContext(context) => {
+            ReceiveSession::Initialized(context) => {
                 read_from_directory(context, &persister, &mut db_conn, bit, desc, secp)?;
             }
-            ReceiverState::UncheckedProposal(proposal) => {
+            ReceiveSession::UncheckedProposal(proposal) => {
                 check_proposal(proposal, &persister, &mut db_conn, bit, desc, secp)?;
             }
-            ReceiverState::MaybeInputsOwned(proposal) => {
+            ReceiveSession::MaybeInputsOwned(proposal) => {
                 check_inputs_not_owned(proposal, &persister, &mut db_conn, desc, secp)?;
             }
-            ReceiverState::MaybeInputsSeen(proposal) => {
+            ReceiveSession::MaybeInputsSeen(proposal) => {
                 check_no_inputs_seen_before(proposal, &persister, &mut db_conn, desc, secp)?;
             }
-            ReceiverState::OutputsUnknown(proposal) => {
+            ReceiveSession::OutputsUnknown(proposal) => {
                 identify_receiver_outputs(proposal, &persister, &mut db_conn, desc, secp)?;
             }
-            ReceiverState::WantsOutputs(proposal) => {
+            ReceiveSession::WantsOutputs(proposal) => {
                 commit_outputs(proposal, &persister, &mut db_conn, desc, secp)?;
             }
-            ReceiverState::WantsInputs(proposal) => {
+            ReceiveSession::WantsInputs(proposal) => {
                 contribute_inputs(proposal, &persister, &mut db_conn, desc, secp)?
             }
-            ReceiverState::ProvisionalProposal(proposal) => {
+            ReceiveSession::ProvisionalProposal(proposal) => {
                 finalize_proposal(proposal, &persister, history, &mut db_conn, secp)?
             }
-            ReceiverState::PayjoinProposal(proposal) => {
+            ReceiveSession::PayjoinProposal(proposal) => {
                 send_payjoin_proposal(proposal, &persister, history)?
             }
             _ => return Err(format!("Unexpected receiver state: {:?}", state).into()),

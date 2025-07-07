@@ -3417,7 +3417,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -4284,8 +4284,8 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "payjoin"
-version = "0.23.0"
-source = "git+https://github.com/arturgontijo/rust-payjoin.git?branch=session-event-log-sketch#ca37d0fe7c1d9d7a3d24f4b5e34183bc13232b64"
+version = "0.24.0"
+source = "git+https://github.com/arturgontijo/rust-payjoin.git?branch=p2wsh-fix#353dd8ab6aace31713d97d0e348c02197273a2af"
 dependencies = [
  "bhttp",
  "bitcoin",
@@ -4724,7 +4724,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5323,7 +5323,7 @@ version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
- "bitcoin_hashes 0.14.0",
+ "bitcoin_hashes 0.12.0",
  "rand 0.8.5",
  "secp256k1-sys",
  "serde",

@@ -68,6 +68,10 @@ pub fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::Ver
                 value: Amount::ZERO,
                 script_pubkey: ScriptBuf::default(),
             });
+
+            input.final_script_sig = None;
+            input.final_script_witness = None;
+
             witness_utxo_to_clean.push(index);
             continue;
         }
@@ -75,13 +79,15 @@ pub fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::Ver
             || input.final_script_witness.is_some()
             || input.partial_sigs.is_empty()
         {
+            input.final_script_sig = None;
+            input.final_script_witness = None;
             continue;
         }
         inputs_to_finalize.push(index);
     }
 
-    for index in inputs_to_finalize {
-        match psbt.finalize_inp_mut(secp, index) {
+    for index in &inputs_to_finalize {
+        match psbt.finalize_inp_mut(secp, *index) {
             Ok(_) => log::info!("[Payjoin] Finalizing input at: {}", index),
             Err(e) => log::warn!("[Payjoin] Failed to finalize input at: {} | {}", index, e),
         }

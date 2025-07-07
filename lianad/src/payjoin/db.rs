@@ -1,7 +1,7 @@
 use payjoin::bitcoin::{Psbt, Txid};
 use payjoin::persist::SessionPersister;
-use payjoin::receive::v2::ReceiverSessionEvent;
-use payjoin::send::v2::SenderSessionEvent;
+use payjoin::receive::v2::SessionEvent as ReceiverSessionEvent;
+use payjoin::send::v2::SessionEvent as SenderSessionEvent;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
