@@ -65,7 +65,7 @@ impl From<i32> for PayjoinStatus {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PayjoinInfo {
     pub sender_status: Option<PayjoinStatus>,
     pub receiver_status: Option<PayjoinStatus>,
