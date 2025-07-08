@@ -604,16 +604,22 @@ impl Step for DefineSpend {
                     }
 
                     view::CreateSpendMessage::Bip21Edited(i, bip21) => {
+                        log::info!("Bip21Edited: {}", bip21);
                         if let Some(recipient) = self.recipients.get_mut(i) {
                             recipient.bip21.value = bip21.clone();
                             if let Ok(uri) = Uri::try_from(bip21.as_str()) {
                                 if let Ok(address) = uri.address.require_network(cache.network) {
                                     recipient.address.value = address.to_string();
+                                    recipient.update(cache.network, view::CreateSpendMessage::RecipientEdited(i, "address", address.to_string()));
                                 }
                                 if let Some(amount) = uri.amount {
+                                    log::info!("Amount: {}", amount);
                                     recipient.amount.value =
                                         amount.to_string_in(Denomination::Bitcoin);
+                                    recipient.update(cache.network, view::CreateSpendMessage::RecipientEdited(i, "amount", amount.to_string_in(Denomination::Bitcoin)));
                                 }
+                            } else {
+                                self.warning = Some(SpendCreationError::InvalidBip21.into());
                             }
                         }
                     }

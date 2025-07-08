@@ -109,15 +109,16 @@ impl<C: Client + Send + Sync + Debug> Daemon for Lianad<C> {
     }
 
     async fn receive_payjoin(&self) -> Result<GetAddressResult, DaemonError> {
-        unimplemented!()
+        self.call("receivepayjoin", Option::<Request>::None)
     }
 
-    async fn send_payjoin(&self, _bip21: String, _psbt: &Psbt) -> Result<(), DaemonError> {
-        unimplemented!()
+    async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError> {
+        let _res: serde_json::value::Value = self.call("sendpayjoin", Some(vec![bip21, psbt.to_string()]))?;
+        Ok(())
     }
 
-    async fn get_payjoin_info(&self, _txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError> {
-        unimplemented!()
+    async fn get_payjoin_info(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError> {
+        self.call("getpayjoininfo", Some(vec![txid.to_string()]))
     }
 
     async fn update_deriv_indexes(
