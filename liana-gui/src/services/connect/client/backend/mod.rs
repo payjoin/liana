@@ -17,7 +17,6 @@ use lianad::{
     bip329::Labels,
     commands::{CoinStatus, GetInfoDescriptors, LCSpendInfo, LabelItem, UpdateDerivIndexesResult},
     config::Config,
-    payjoin::types::PayjoinInfo,
 };
 use reqwest::{Error, IntoUrl, Method, RequestBuilder, Response};
 use tokio::sync::RwLock;
@@ -629,10 +628,6 @@ impl Daemon for BackendWalletClient {
     }
 
     async fn send_payjoin(&self, _bip21: String, _psbt: &Psbt) -> Result<(), DaemonError> {
-        unimplemented!()
-    }
-
-    async fn get_payjoin_info(&self, _txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError> {
         unimplemented!()
     }
 

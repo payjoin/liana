@@ -1,6 +1,5 @@
 use lianad::bip329::Labels;
 use lianad::commands::UpdateDerivIndexesResult;
-use lianad::payjoin::types::PayjoinInfo;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::Mutex;
 
@@ -134,15 +133,6 @@ impl Daemon for EmbeddedDaemon {
         self.command(|daemon| {
             daemon
                 .init_payjoin_sender(bip21, psbt)
-                .map_err(|e| DaemonError::Unexpected(e.to_string()))
-        })
-        .await
-    }
-
-    async fn get_payjoin_info(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError> {
-        self.command(|daemon| {
-            daemon
-                .get_payjoin_info(txid)
                 .map_err(|e| DaemonError::Unexpected(e.to_string()))
         })
         .await

@@ -9,9 +9,9 @@ use crate::{
     database::{Coin, DatabaseConnection, DatabaseInterface},
     miniscript::bitcoin::absolute::LockTime,
     payjoin::{
-        db::{ReceiverPersister, SenderPersister, SessionId, SessionMetadata, SessionWrapper},
+        db::{ReceiverPersister, SenderPersister, SessionId, SessionWrapper},
         helpers::{fetch_ohttp_keys, FetchOhttpKeysError},
-        types::{PayjoinInfo, PayjoinStatus},
+        types::PayjoinStatus,
     },
     poller::PollerMessage,
     DaemonControl, VERSION,
@@ -49,7 +49,7 @@ use miniscript::{
     psbt::PsbtExt,
 };
 use payjoin::{
-    bitcoin::{key::Secp256k1, FeeRate, Txid},
+    bitcoin::{key::Secp256k1, FeeRate},
     receive::v2::{Receiver, SessionEvent as ReceiverSessionEvent, UninitializedReceiver},
     send::v2::SenderBuilder,
     Uri, UriExt,
@@ -460,53 +460,6 @@ impl DaemonControl {
         );
 
         Ok(())
-    }
-
-    /// Get Payjoin URI (BIP21) and its sender/receiver status by txid
-    /// TODO: this seems unused, can we remove it?
-    pub fn get_payjoin_info(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, CommandError> {
-        let mut db_conn = self.db.connection();
-
-        let mut receiver_status = None;
-        for (_, session) in db_conn.payjoin_get_all_receiver_sessions() {
-            let SessionMetadata {
-                status, maybe_txid, ..
-            } = session.metadata.clone();
-            if let Some(db_txid) = maybe_txid {
-                if &db_txid == txid {
-                    receiver_status = Some(status);
-                    break;
-                }
-            }
-        }
-
-        let mut bip21 = String::new();
-        let mut sender_status = None;
-        for (_, session) in db_conn.payjoin_get_all_sender_sessions() {
-            let SessionMetadata {
-                status,
-                maybe_txid,
-                maybe_bip21,
-                ..
-            } = session.metadata.clone();
-            if let Some(db_txid) = maybe_txid {
-                if &db_txid == txid {
-                    sender_status = Some(status);
-                    bip21 = maybe_bip21.unwrap_or_default();
-                    break;
-                }
-            }
-        }
-
-        if receiver_status.is_some() || sender_status.is_some() {
-            Ok(Some(PayjoinInfo {
-                bip21,
-                sender_status,
-                receiver_status,
-            }))
-        } else {
-            Ok(None)
-        }
     }
 
     pub fn payjoin_get_all_receiver_sessions(
