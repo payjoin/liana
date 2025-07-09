@@ -9,7 +9,7 @@ use crate::{
     database::{Coin, DatabaseConnection, DatabaseInterface},
     miniscript::bitcoin::absolute::LockTime,
     payjoin::{
-        db::{ReceiverPersister, SenderPersister, SessionId},
+        db::{ReceiverPersister, SenderPersister},
         helpers::{fetch_ohttp_keys, FetchOhttpKeysError},
     },
     poller::PollerMessage,
@@ -453,17 +453,6 @@ impl DaemonControl {
             .unwrap();
 
         Ok(())
-    }
-
-    // TODO: this seems unsued can we remove?
-    pub fn payjoin_get_all_receiver_sessions(&self) -> Vec<SessionId> {
-        let mut db_conn = self.db.connection();
-        db_conn.get_all_receiver_session_ids()
-    }
-
-    // TODO: is this unused? Can we remove it?
-    pub fn payjoin_get_receiver_session(&self, session_id: &SessionId) -> ReceiverPersister {
-        ReceiverPersister::from_id(Arc::new(self.db.clone()), session_id.clone())
     }
 
     /// Update derivation indexes
