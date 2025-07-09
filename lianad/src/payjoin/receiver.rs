@@ -2,14 +2,14 @@ use std::{
     collections::HashMap,
     error::Error,
     sync::{self, Arc},
+    time::SystemTime,
 };
 
 use liana::descriptors;
 
 use payjoin::{
     bitcoin::{
-        consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence,
-        TxIn, Weight,
+        consensus::encode::serialize_hex, psbt::Input, secp256k1, OutPoint, Sequence, TxIn, Weight,
     },
     persist::OptionalTransitionOutcome,
     receive::{
@@ -25,10 +25,7 @@ use payjoin::{
 use crate::{
     bitcoin::BitcoinInterface,
     database::{Coin, CoinStatus, DatabaseConnection, DatabaseInterface},
-    payjoin::{
-        db::SessionMetadata,
-        helpers::{finalize_psbt, post_request, OHTTP_RELAY},
-    },
+    payjoin::helpers::{finalize_psbt, post_request, OHTTP_RELAY},
 };
 
 use super::{db::ReceiverPersister, types::PayjoinStatus};
@@ -47,14 +44,9 @@ fn read_from_directory(
         .expect("Failed to extract request");
     let proposal = match post_request(req.clone()) {
         Ok(ohttp_response) => {
+            let response_bytes = ohttp_response.bytes()?;
             let state_transition = receiver
-                .process_res(
-                    ohttp_response
-                        .bytes()
-                        .expect("Failed to read response")
-                        .as_ref(),
-                    context,
-                )
+                .process_res(response_bytes.as_ref(), context)
                 .save(persister);
             match state_transition {
                 Ok(OptionalTransitionOutcome::Progress(next_state)) => next_state,
@@ -152,7 +144,9 @@ fn contribute_inputs(
     let mut candidate_inputs_map = HashMap::<OutPoint, (Coin, TxIn, Input, Weight)>::new();
     for (outpoint, coin) in coins.iter() {
         let txs = db_conn.list_wallet_transactions(&[outpoint.txid]);
-        let (db_tx, _, _) = txs.first().unwrap();
+        let (db_tx, _, _) = txs
+            .first()
+            .expect("There should be at least tx in the wallet");
 
         let tx = db_tx.clone();
 
@@ -236,14 +230,15 @@ fn finalize_proposal(
             }
 
             if is_signed {
-                let mut psbt = psbt.clone();
-                finalize_psbt(&mut psbt, secp);
-
                 let proposal = proposal
                     .finalize_proposal(
-                        |_| Ok(psbt.clone()),
+                        |_| {
+                            let mut psbt = psbt.clone();
+                            finalize_psbt(&mut psbt, secp);
+                            Ok(psbt)
+                        },
                         None,
-                        Some(FeeRate::from_sat_per_vb(150).unwrap()),
+                        None,
                     )
                     .save(persister)?;
 
@@ -295,24 +290,17 @@ fn process_receiver_session(
 ) -> Result<(), Box<dyn Error>> {
     let mut db_conn = db.connection();
     for (session_id, session) in db_conn.payjoin_get_all_receiver_sessions() {
-        let SessionMetadata {
-            status,
-            maybe_bip21,
-            ..
-        } = session.metadata.clone();
-
-        // No need to check Completed
-        if status == PayjoinStatus::Completed {
+        // No need to check past completed payjoins
+        if session.completed_at.is_some()
+            && SystemTime::now() > session.completed_at.expect("Some system time exists")
+        {
             continue;
         }
-
-        log::info!("[Payjoin] {:?}: bip21={:?}", status, maybe_bip21);
 
         let persister = ReceiverPersister::from_id(Arc::new(db.clone()), session_id.clone());
 
         let (state, history) = replay_event_log(&persister)
-            .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))
-            .unwrap();
+            .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))?;
 
         match state {
             ReceiveSession::Initialized(context) => {
