@@ -508,6 +508,18 @@ fn send_payjoin(control: &DaemonControl, params: Params) -> Result<serde_json::V
     Ok(serde_json::json!({}))
 }
 
+fn get_payjoin_info(control: &DaemonControl, params: Params) -> Result<serde_json::Value, Error> {
+    let txid = params
+        .get(0, "txid")
+        .ok_or_else(|| Error::invalid_params("Missing 'txid' parameter."))?
+        .as_str()
+        .ok_or_else(|| Error::invalid_params("Invalid 'txid' parameter."))?;
+    let txid = bitcoin::Txid::from_str(txid)
+        .map_err(|_| Error::invalid_params("Invalid 'txid' parameter."))?;
+    let res = control.get_payjoin_info(&txid)?;
+    Ok(serde_json::json!(&res))
+}
+
 /// Handle an incoming JSONRPC2 request.
 pub fn handle_request(control: &mut DaemonControl, req: Request) -> Result<Response, Error> {
     let result = match req.method.as_str() {
@@ -621,6 +633,12 @@ pub fn handle_request(control: &mut DaemonControl, req: Request) -> Result<Respo
                 .params
                 .ok_or_else(|| Error::invalid_params("Missing 'payjoin_url' parameter."))?;
             send_payjoin(control, params)?
+        }
+        "getpayjoininfo" => {
+            let params = req
+                .params
+                .ok_or_else(|| Error::invalid_params("Missing 'txid' parameter."))?;
+            get_payjoin_info(control, params)?
         }
         _ => {
             return Err(Error::method_not_found());
