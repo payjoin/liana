@@ -10,7 +10,7 @@ use crate::{
         schema::{DbBlockInfo, DbCoin, DbTip},
         SqliteConn, SqliteDb,
     },
-    payjoin::db::{SessionId, SessionWrapper},
+    payjoin::db::SessionId,
 };
 
 use std::{
@@ -23,10 +23,7 @@ use std::{
 
 use bip329::Labels;
 use miniscript::bitcoin::{self, bip32, psbt::Psbt, secp256k1, Address, Network, OutPoint, Txid};
-use payjoin::{
-    receive::v2::SessionEvent as ReceiverSessionEvent,
-    send::v2::SessionEvent as SenderSessionEvent, OhttpKeys,
-};
+use payjoin::OhttpKeys;
 
 /// Information about the wallet.
 ///
@@ -200,8 +197,6 @@ pub trait DatabaseConnection {
     /// Dump all labels
     fn get_labels_bip329(&mut self, offset: u32, limit: u32) -> Labels;
 
-    /// Payjoin
-
     /// Get the next Session Id
     fn payjoin_get_ohttp_keys(&mut self, ohttp_relay: &str) -> Option<(u32, OhttpKeys)>;
 
@@ -212,55 +207,34 @@ pub trait DatabaseConnection {
     fn payjoin_next_id(&mut self, table: &str) -> u64;
 
     /// Save Receiver Session
-    fn payjoin_save_receiver_session(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<ReceiverSessionEvent>,
-    );
-
-    /// Get a Receiver Session by Id
-    fn payjoin_get_receiver_session(
-        &mut self,
-        session_id: &SessionId,
-    ) -> Option<SessionWrapper<ReceiverSessionEvent>>;
+    fn save_new_payjoin_receiver_session(&mut self, session_id: &SessionId);
 
     /// Get all Receiver Sessions
-    fn payjoin_get_all_receiver_sessions(
-        &mut self,
-    ) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)>;
+    fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId>;
 
-    /// Update the status of a payjoin receiver
-    fn update_payjoin_receiver_status(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<ReceiverSessionEvent>,
-    );
+    /// Save a Receiver Session Event
+    fn save_receiver_session_event(&mut self, session_id: &SessionId, event: Vec<u8>);
+
+    /// Update completed at timestamp for a Receiver Session
+    /// Sets completed_at to current timestamp
+    fn update_receiver_session_completed_at(&mut self, session_id: &SessionId);
+
+    /// Load all receiver session events for a particular session id
+    fn load_receiver_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>>;
 
     /// Create a payjoin sender
-    fn payjoin_save_sender_session(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<SenderSessionEvent>,
-    );
-
-    fn payjoin_get_sender_session(
-        &mut self,
-        session_id: &SessionId,
-    ) -> Option<SessionWrapper<SenderSessionEvent>>;
-
+    fn save_new_payjoin_sender_session(&mut self, session_id: &SessionId);
     /// Get a all active payjoin senders
-    fn payjoin_get_all_sender_sessions(
-        &mut self,
-    ) -> Vec<(SessionId, SessionWrapper<SenderSessionEvent>)>;
+    fn get_all_sender_session_ids(&mut self) -> Vec<SessionId>;
 
-    /// Update the status of a payjoin sender
-    fn update_payjoin_sender_status(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<SenderSessionEvent>,
-    );
+    /// Save a sender session event
+    fn save_sender_session_event(&mut self, session_id: &SessionId, event: Vec<u8>);
 
-    // -------
+    /// Get all sender session events for a particular session id
+    fn get_all_sender_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>>;
+
+    /// Update the completed at timestamp for a sender session
+    fn update_sender_session_completed_at(&mut self, session_id: &SessionId);
 }
 
 impl DatabaseConnection for SqliteConn {
@@ -496,62 +470,44 @@ impl DatabaseConnection for SqliteConn {
         self.payjoin_next_id(table)
     }
 
-    fn payjoin_save_receiver_session(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<ReceiverSessionEvent>,
-    ) {
-        self.payjoin_save_receiver_session(session_id, session)
+    fn save_new_payjoin_receiver_session(&mut self, session_id: &SessionId) {
+        self.save_new_payjoin_receiver_session(session_id)
     }
 
-    fn payjoin_get_receiver_session(
-        &mut self,
-        session_id: &SessionId,
-    ) -> Option<SessionWrapper<ReceiverSessionEvent>> {
-        self.payjoin_get_receiver_session(session_id)
+    fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
+        self.get_all_receiver_session_ids()
     }
 
-    fn payjoin_get_all_receiver_sessions(
-        &mut self,
-    ) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)> {
-        self.payjoin_get_all_receiver_sessions()
+    fn save_receiver_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {
+        self.save_receiver_session_event(session_id, event)
     }
 
-    fn update_payjoin_receiver_status(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<ReceiverSessionEvent>,
-    ) {
-        self.update_payjoin_receiver_status(session_id, session)
+    fn update_receiver_session_completed_at(&mut self, session_id: &SessionId) {
+        self.update_receiver_session_completed_at(session_id)
     }
 
-    fn payjoin_save_sender_session(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<SenderSessionEvent>,
-    ) {
-        self.payjoin_save_sender_session(session_id, session)
+    fn load_receiver_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>> {
+        self.load_receiver_session_events(session_id)
     }
 
-    fn payjoin_get_sender_session(
-        &mut self,
-        session_id: &SessionId,
-    ) -> Option<SessionWrapper<SenderSessionEvent>> {
-        self.payjoin_get_sender_session(session_id)
+    fn save_new_payjoin_sender_session(&mut self, session_id: &SessionId) {
+        self.save_new_payjoin_sender_session(session_id)
     }
 
-    fn payjoin_get_all_sender_sessions(
-        &mut self,
-    ) -> Vec<(SessionId, SessionWrapper<SenderSessionEvent>)> {
-        self.payjoin_get_all_sender_sessions()
+    fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {
+        self.get_all_sender_session_ids()
     }
 
-    fn update_payjoin_sender_status(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<SenderSessionEvent>,
-    ) {
-        self.update_payjoin_sender_status(session_id, session)
+    fn save_sender_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {
+        self.save_sender_session_event(session_id, event)
+    }
+
+    fn get_all_sender_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>> {
+        self.load_sender_session_events(session_id)
+    }
+
+    fn update_sender_session_completed_at(&mut self, session_id: &SessionId) {
+        self.update_sender_session_completed_at(session_id)
     }
 }
 

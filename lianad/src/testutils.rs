@@ -5,7 +5,7 @@ use crate::{
         BlockInfo, Coin, CoinStatus, DatabaseConnection, DatabaseInterface, LabelItem, Wallet,
     },
     datadir::DataDirectory,
-    payjoin::db::{SessionId, SessionWrapper},
+    payjoin::db::SessionId,
     DaemonControl, DaemonHandle,
 };
 use liana::descriptors;
@@ -560,33 +560,10 @@ impl DatabaseConnection for DummyDatabase {
         todo!()
     }
 
-    fn payjoin_get_all_receiver_sessions(
-        &mut self,
-    ) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)> {
+    fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
         todo!()
     }
-
-    fn update_payjoin_receiver_status(
-        &mut self,
-        _session_id: &SessionId,
-        _session: SessionWrapper<ReceiverSessionEvent>,
-    ) {
-        todo!()
-    }
-
-    fn payjoin_save_sender_session(
-        &mut self,
-        _session_id: &SessionId,
-        _session: SessionWrapper<SenderSessionEvent>,
-    ) {
-        todo!()
-    }
-
-    fn update_payjoin_sender_status(
-        &mut self,
-        _session_id: &SessionId,
-        _session: SessionWrapper<SenderSessionEvent>,
-    ) {
+    fn save_new_payjoin_sender_session(&mut self, _session_id: &SessionId) {
         todo!()
     }
 
@@ -594,31 +571,7 @@ impl DatabaseConnection for DummyDatabase {
         todo!()
     }
 
-    fn payjoin_save_receiver_session(
-        &mut self,
-        _session_id: &SessionId,
-        _session: SessionWrapper<ReceiverSessionEvent>,
-    ) {
-        todo!()
-    }
-
-    fn payjoin_get_receiver_session(
-        &mut self,
-        _session_id: &SessionId,
-    ) -> Option<SessionWrapper<ReceiverSessionEvent>> {
-        todo!()
-    }
-
-    fn payjoin_get_sender_session(
-        &mut self,
-        _session_id: &SessionId,
-    ) -> Option<SessionWrapper<SenderSessionEvent>> {
-        todo!()
-    }
-
-    fn payjoin_get_all_sender_sessions(
-        &mut self,
-    ) -> Vec<(SessionId, SessionWrapper<SenderSessionEvent>)> {
+    fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {
         todo!()
     }
 
@@ -627,6 +580,34 @@ impl DatabaseConnection for DummyDatabase {
     }
 
     fn payjoin_save_ohttp_keys(&mut self, _ohttp_relay: &str, _ohttp_keys: payjoin::OhttpKeys) {
+        todo!()
+    }
+
+    fn save_new_payjoin_receiver_session(&mut self, session_id: &SessionId) {
+        todo!()
+    }
+
+    fn save_receiver_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {
+        todo!()
+    }
+
+    fn update_receiver_session_completed_at(&mut self, session_id: &SessionId) {
+        todo!()
+    }
+
+    fn load_receiver_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>> {
+        todo!()
+    }
+
+    fn save_sender_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {
+        todo!()
+    }
+
+    fn get_all_sender_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>> {
+        todo!()
+    }
+
+    fn update_sender_session_completed_at(&mut self, session_id: &SessionId) {
         todo!()
     }
 }

@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     error::Error,
     sync::{self, Arc},
-    time::SystemTime,
 };
 
 use liana::descriptors;
@@ -15,8 +14,8 @@ use payjoin::{
     receive::{
         v2::{
             replay_event_log, Initialized, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown,
-            PayjoinProposal, ProvisionalProposal, ReceiveSession, Receiver, SessionHistory,
-            UncheckedProposal, WantsInputs, WantsOutputs,
+            PayjoinProposal, ProvisionalProposal, ReceiveSession, Receiver, UncheckedProposal,
+            WantsInputs, WantsOutputs,
         },
         InputPair,
     },
@@ -28,7 +27,7 @@ use crate::{
     payjoin::helpers::{finalize_psbt, post_request, OHTTP_RELAY},
 };
 
-use super::{db::ReceiverPersister, types::PayjoinStatus};
+use super::db::ReceiverPersister;
 
 fn read_from_directory(
     receiver: Receiver<Initialized>,
@@ -195,17 +194,9 @@ fn contribute_inputs(
         .unwrap();
 
     let psbt = history.psbt_with_contributed_inputs().unwrap();
-    let bip21 = history.pj_uri().unwrap().to_string();
 
     db_conn.store_spend(&psbt);
     log::info!("[Payjoin] PSBT in the DB...");
-
-    persister.update_metadata(
-        Some(PayjoinStatus::Signing),
-        Some(psbt.unsigned_tx.compute_txid()),
-        Some(psbt.clone()),
-        Some(bip21.clone()),
-    );
 
     Ok(())
 }
@@ -213,10 +204,12 @@ fn contribute_inputs(
 fn finalize_proposal(
     proposal: Receiver<ProvisionalProposal>,
     persister: &ReceiverPersister,
-    history: SessionHistory,
     db_conn: &mut Box<dyn DatabaseConnection>,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
+    let (_, history) = replay_event_log(persister)
+        .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))?;
+
     if let Some(proposed_psbt) = history.psbt_with_contributed_inputs() {
         let txid = proposed_psbt.unsigned_tx.compute_txid();
         if let Some(psbt) = db_conn.spend_tx(&txid) {
@@ -242,7 +235,7 @@ fn finalize_proposal(
                     )
                     .save(persister)?;
 
-                send_payjoin_proposal(proposal, persister, history)?;
+                send_payjoin_proposal(proposal, persister)?;
             }
         }
     }
@@ -252,14 +245,10 @@ fn finalize_proposal(
 fn send_payjoin_proposal(
     mut proposal: Receiver<PayjoinProposal>,
     persister: &ReceiverPersister,
-    history: SessionHistory,
 ) -> Result<(), Box<dyn Error>> {
     let (req, ctx) = proposal
         .extract_req(OHTTP_RELAY)
         .expect("Failed to extract request");
-
-    let psbt = proposal.psbt().clone();
-    let txid = psbt.unsigned_tx.compute_txid();
 
     // Respond to sender
     log::info!("[Payjoin] Receiver responding to sender...");
@@ -268,14 +257,6 @@ fn send_payjoin_proposal(
             proposal
                 .process_res(resp.bytes().expect("Failed to read response").as_ref(), ctx)
                 .save(persister)?;
-
-            let bip21 = history.pj_uri().unwrap();
-            persister.update_metadata(
-                Some(PayjoinStatus::Completed),
-                Some(txid),
-                Some(psbt),
-                Some(bip21.to_string()),
-            );
         }
         Err(err) => log::error!("[Payjoin] send_payjoin_proposal(): {}", err),
     }
@@ -289,17 +270,10 @@ fn process_receiver_session(
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let mut db_conn = db.connection();
-    for (session_id, session) in db_conn.payjoin_get_all_receiver_sessions() {
-        // No need to check past completed payjoins
-        if session.completed_at.is_some()
-            && SystemTime::now() > session.completed_at.expect("Some system time exists")
-        {
-            continue;
-        }
-
+    for session_id in db_conn.get_all_receiver_session_ids() {
         let persister = ReceiverPersister::from_id(Arc::new(db.clone()), session_id.clone());
 
-        let (state, history) = replay_event_log(&persister)
+        let (state, _) = replay_event_log(&persister)
             .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))?;
 
         match state {
@@ -325,10 +299,10 @@ fn process_receiver_session(
                 contribute_inputs(proposal, &persister, &mut db_conn, desc, secp)?
             }
             ReceiveSession::ProvisionalProposal(proposal) => {
-                finalize_proposal(proposal, &persister, history, &mut db_conn, secp)?
+                finalize_proposal(proposal, &persister, &mut db_conn, secp)?
             }
             ReceiveSession::PayjoinProposal(proposal) => {
-                send_payjoin_proposal(proposal, &persister, history)?
+                send_payjoin_proposal(proposal, &persister)?
             }
             _ => return Err(format!("Unexpected receiver state: {:?}", state).into()),
         }
