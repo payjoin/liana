@@ -25,13 +25,10 @@ use crate::{
         },
         Coin, CoinStatus, LabelItem,
     },
-    payjoin::db::{SessionId, SessionWrapper},
+    payjoin::db::SessionId,
 };
 use liana::descriptors::LianaDescriptor;
-use payjoin::{
-    receive::v2::SessionEvent as ReceiverSessionEvent,
-    send::v2::SessionEvent as SenderSessionEvent, OhttpKeys,
-};
+use payjoin::OhttpKeys;
 
 use std::{
     cmp,
@@ -1039,146 +1036,126 @@ impl SqliteConn {
     }
 
     /// Create new Receiver Session
-    pub fn payjoin_save_receiver_session(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<ReceiverSessionEvent>,
-    ) {
-        let session_ser = serde_json::to_vec(&session).unwrap();
+    pub fn save_new_payjoin_receiver_session(&mut self, session_id: &SessionId) {
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_receivers (session_id, session) VALUES (?1, ?2)",
-                rusqlite::params![session_id.0, session_ser],
+                "INSERT INTO payjoin_receivers (session_id, created_at) VALUES (?1, ?2)",
+                rusqlite::params![session_id.0, curr_timestamp()],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
     }
 
-    /// Get a Receiver Session by Id
-    pub fn payjoin_get_receiver_session(
-        &mut self,
-        session_id: &SessionId,
-    ) -> Option<SessionWrapper<ReceiverSessionEvent>> {
+    /// Get all active receiver session ids
+    pub fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
         db_query(
             &mut self.conn,
-            "SELECT session FROM payjoin_receivers WHERE session_id = ?1",
-            rusqlite::params![session_id.0],
-            |row| {
-                let session_ser: Vec<u8> = row.get(0)?;
-                let session: SessionWrapper<ReceiverSessionEvent> =
-                    serde_json::from_slice(&session_ser).unwrap();
-                Ok(session)
-            },
-        )
-        .expect("Db must not fail")
-        .pop()
-    }
-
-    pub fn update_payjoin_receiver_status(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<ReceiverSessionEvent>,
-    ) {
-        let session_ser = serde_json::to_vec(&session).unwrap();
-        db_exec(&mut self.conn, |db_tx| {
-            db_tx.execute(
-                "UPDATE payjoin_receivers SET session = ?1 WHERE session_id = ?2",
-                rusqlite::params![session_ser, session_id.0],
-            )?;
-            Ok(())
-        })
-        .expect("Db must not fail");
-    }
-
-    pub fn payjoin_get_all_receiver_sessions(
-        &mut self,
-    ) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)> {
-        db_query(
-            &mut self.conn,
-            "SELECT session_id, session FROM payjoin_receivers",
+            "SELECT session_id FROM payjoin_receivers WHERE completed_at IS NOT NULL",
             rusqlite::params![],
             |row| {
                 let id: u64 = row.get(0)?;
-                let session_id = SessionId::new(id);
-                let session_ser: Vec<u8> = row.get(1)?;
-                let session: SessionWrapper<ReceiverSessionEvent> =
-                    serde_json::from_slice(&session_ser).unwrap();
-                Ok((session_id, session))
+                Ok(SessionId::new(id))
             },
         )
         .expect("Db must not fail")
     }
 
-    /// Create a payjoin sender
-    pub fn payjoin_save_sender_session(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<SenderSessionEvent>,
-    ) {
-        let session_ser = serde_json::to_vec(&session).unwrap();
+    /// Save a Receiver Session Event
+    pub fn save_receiver_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_senders (session_id, session) VALUES (?1, ?2)",
-                rusqlite::params![session_id.0, session_ser],
+                "INSERT INTO payjoin_receiver_events (session_id, created_at, event) VALUES (?1, ?2, ?3)",
+                rusqlite::params![session_id.0, curr_timestamp(), event],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
     }
 
-    pub fn payjoin_get_sender_session(
-        &mut self,
-        session_id: &SessionId,
-    ) -> Option<SessionWrapper<SenderSessionEvent>> {
+    /// Update completed at timestamp for a Receiver Session
+    pub fn update_receiver_session_completed_at(&mut self, session_id: &SessionId) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "UPDATE payjoin_receivers SET completed_at = ?1 WHERE session_id = ?2",
+                rusqlite::params![curr_timestamp(), session_id.0],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    /// Load all receiver session events for a particular session id
+    pub fn load_receiver_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>> {
         db_query(
             &mut self.conn,
-            "SELECT session FROM payjoin_senders WHERE session_id = ?1",
+            "SELECT event FROM payjoin_receiver_events WHERE session_id = ?1 ORDER BY created_at ASC",
             rusqlite::params![session_id.0],
             |row| {
-                let session_ser: Vec<u8> = row.get(0)?;
-                let session: SessionWrapper<SenderSessionEvent> =
-                    serde_json::from_slice(&session_ser).unwrap();
-                Ok(session)
+                let event: Vec<u8> = row.get(0)?;
+                Ok(event)
             },
         )
         .expect("Db must not fail")
-        .pop()
     }
 
-    pub fn payjoin_get_all_sender_sessions(
-        &mut self,
-    ) -> Vec<(SessionId, SessionWrapper<SenderSessionEvent>)> {
+    pub fn save_new_payjoin_sender_session(&mut self, session_id: &SessionId) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "INSERT INTO payjoin_senders (session_id, created_at) VALUES (?1, ?2)",
+                rusqlite::params![session_id.0, curr_timestamp()],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    pub fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {
         db_query(
             &mut self.conn,
-            "SELECT session_id, session FROM payjoin_senders",
+            "SELECT session_id FROM payjoin_senders",
             rusqlite::params![],
             |row| {
                 let id: u64 = row.get(0)?;
-                let session_id = SessionId::new(id);
-                let session_ser: Vec<u8> = row.get(1)?;
-                let session: SessionWrapper<SenderSessionEvent> =
-                    serde_json::from_slice(&session_ser).unwrap();
-                Ok((session_id, session))
+                Ok(SessionId::new(id))
             },
         )
         .expect("Db must not fail")
     }
 
-    pub fn update_payjoin_sender_status(
-        &mut self,
-        session_id: &SessionId,
-        session: SessionWrapper<SenderSessionEvent>,
-    ) {
-        let session_ser = serde_json::to_vec(&session).unwrap();
+    pub fn save_sender_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "UPDATE payjoin_senders SET session = ?1 WHERE session_id = ?2",
-                rusqlite::params![session_ser, session_id.0],
+                "INSERT INTO payjoin_sender_events (session_id, created_at, event) VALUES (?1, ?2, ?3)",
+                rusqlite::params![session_id.0, curr_timestamp(), event],
             )?;
             Ok(())
         })
         .expect("Db must not fail");
+    }
+
+    pub fn update_sender_session_completed_at(&mut self, session_id: &SessionId) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "UPDATE payjoin_senders SET completed_at = ?1 WHERE session_id = ?2",
+                rusqlite::params![curr_timestamp(), session_id.0],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    pub fn load_sender_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>> {
+        db_query(
+            &mut self.conn,
+            "SELECT event FROM payjoin_sender_events WHERE session_id = ?1 ORDER BY created_at ASC",
+            rusqlite::params![session_id.0],
+            |row| {
+                let event: Vec<u8> = row.get(0)?;
+                Ok(event)
+            },
+        )
+        .expect("Db must not fail")
     }
 }
 

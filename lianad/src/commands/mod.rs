@@ -9,9 +9,8 @@ use crate::{
     database::{Coin, DatabaseConnection, DatabaseInterface},
     miniscript::bitcoin::absolute::LockTime,
     payjoin::{
-        db::{ReceiverPersister, SenderPersister, SessionId, SessionWrapper},
+        db::{ReceiverPersister, SenderPersister, SessionId},
         helpers::{fetch_ohttp_keys, FetchOhttpKeysError},
-        types::PayjoinStatus,
     },
     poller::PollerMessage,
     DaemonControl, VERSION,
@@ -50,7 +49,7 @@ use miniscript::{
 };
 use payjoin::{
     bitcoin::{key::Secp256k1, FeeRate},
-    receive::v2::{Receiver, SessionEvent as ReceiverSessionEvent, UninitializedReceiver},
+    receive::v2::{Receiver, UninitializedReceiver},
     send::v2::SenderBuilder,
     Uri, UriExt,
 };
@@ -447,26 +446,19 @@ impl DaemonControl {
             .map_err(|e| CommandError::FailedToPostOriginalPayjoinProposal(e[0].to_string()))?;
 
         let persister = SenderPersister::new(Arc::new(self.db.clone()));
+        log::info!("Saving new sender: {:?}", persister.session_id);
         let _sender = SenderBuilder::new(psbt.clone(), uri)
             .build_recommended(FeeRate::BROADCAST_MIN)
             .save(&persister)
             .unwrap();
 
-        persister.update_metadata(
-            Some(PayjoinStatus::Pending),
-            Some(psbt.unsigned_tx.compute_txid()),
-            Some(psbt.clone()),
-            Some(bip21.clone()),
-        );
-
         Ok(())
     }
 
-    pub fn payjoin_get_all_receiver_sessions(
-        &self,
-    ) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)> {
+    // TODO: this seems unsued can we remove?
+    pub fn payjoin_get_all_receiver_sessions(&self) -> Vec<SessionId> {
         let mut db_conn = self.db.connection();
-        db_conn.payjoin_get_all_receiver_sessions()
+        db_conn.get_all_receiver_session_ids()
     }
 
     // TODO: is this unused? Can we remove it?

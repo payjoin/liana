@@ -1,6 +1,5 @@
 use crate::database::DatabaseInterface;
 
-use crate::payjoin::db::SessionMetadata;
 use crate::payjoin::helpers::post_request;
 
 use std::collections::HashMap;
@@ -14,7 +13,6 @@ use payjoin::send::v2::{Sender, WithReplyKey};
 
 use super::db::SenderPersister;
 use super::helpers::OHTTP_RELAY;
-use super::types::PayjoinStatus;
 
 fn get_proposed_payjoin_psbt(
     context: Sender<V2GetContext>,
@@ -93,85 +91,63 @@ fn process_sender_session(
 
 pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) {
     let mut db_conn = db.connection();
-    for (session_id, session) in db_conn.payjoin_get_all_sender_sessions() {
-        let SessionMetadata {
-            status,
-            maybe_txid,
-            maybe_psbt,
-            maybe_bip21,
-        } = session.metadata.clone();
-
-        // No need to check Completed
-        if status == PayjoinStatus::Completed {
-            continue;
-        }
-
-        log::info!("[Payjoin] {:?}: bip21={:?}", status, maybe_bip21);
-
+    for session_id in db_conn.get_all_sender_session_ids() {
         let persister = SenderPersister::from_id(Arc::new(db.clone()), session_id.clone());
 
-        let (state, _) = replay_event_log(&persister)
+        let (state, session_history) = replay_event_log(&persister)
             .map_err(|e| format!("Failed to replay sender event log: {:?}", e))
+            // TODO: handle error
             .unwrap();
+        let original_psbt = match session_history.fallback_tx().map(|tx| tx.compute_txid()) {
+            Some(txid) => {
+                // Get the original psbt so we can restore the input fields
+                let original_psbt = db_conn.spend_tx(&txid);
+                if original_psbt.is_none() {
+                    log::error!("[Payjoin] expecting fallback txid for session={session_id:?}, but none found");
+                    return;
+                }
+                original_psbt.expect("checked above")
+            }
+            None => {
+                log::info!("[Payjoin] No fallback txid found for session={session_id:?}");
+                return;
+            }
+        };
 
-        match status {
-            PayjoinStatus::Pending => match process_sender_session(state, &persister) {
-                Ok(_) => persister.update_metadata(
-                    Some(PayjoinStatus::WaitingReceiver),
-                    maybe_txid,
-                    maybe_psbt,
-                    maybe_bip21,
-                ),
-                Err(e) => log::warn!("process_sender_session(): {}", e),
-            },
-            PayjoinStatus::WaitingReceiver => match process_sender_session(state, &persister) {
-                Ok(maybe_psbt) => {
-                    if let Some(mut new_psbt) = maybe_psbt {
-                        if let Some(txid) = maybe_txid {
-                            if let Some(psbt) = db_conn.spend_tx(&txid) {
-                                // TODO(arturgontijo): PDK removes fields that we need in the GUI to properly sign the inputs
-                                let mut input_fields_to_restore = HashMap::new();
-                                for (index, txin) in psbt.unsigned_tx.input.iter().enumerate() {
-                                    let mut input_without_sigs = psbt.inputs[index].clone();
-                                    input_without_sigs.partial_sigs = Default::default();
-                                    input_fields_to_restore
-                                        .insert(txin.previous_output, input_without_sigs);
-                                }
-                                log::info!(
-                                    "[Payjoin] Deleting original Payjoin psbt (txid={txid})"
-                                );
-                                db_conn.delete_spend(&txid);
+        match process_sender_session(state, &persister) {
+            Ok(Some(proposal_psbt)) => {
+                let mut proposal_psbt = proposal_psbt;
+                // TODO(arturgontijo): PDK removes fields that we need in the GUI to properly sign the inputs
+                let mut input_fields_to_restore = HashMap::new();
+                for (index, txin) in original_psbt.unsigned_tx.input.iter().enumerate() {
+                    let mut input_without_sigs = original_psbt.inputs[index].clone();
+                    input_without_sigs.partial_sigs = Default::default();
+                    input_fields_to_restore.insert(txin.previous_output, input_without_sigs);
+                }
+                let original_txid = original_psbt.unsigned_tx.compute_txid();
+                log::info!("[Payjoin] Deleting original Payjoin psbt (txid={original_txid})");
+                db_conn.delete_spend(&original_txid);
 
-                                // TODO(arturgontijo): Restoring witness_scripts and bip32_derivation so GUI can sign them
-                                for (index, psbtin) in new_psbt.inputs.iter_mut().enumerate() {
-                                    let outpoint =
-                                        &new_psbt.unsigned_tx.input[index].previous_output;
-                                    if let Some(input) = input_fields_to_restore.get(outpoint) {
-                                        *psbtin = input.clone();
-                                    }
-                                }
-
-                                let new_txid = new_psbt.unsigned_tx.compute_txid();
-                                log::info!(
-                                    "[Payjoin] Updating Payjoin psbt: {} -> {}",
-                                    txid,
-                                    new_txid,
-                                );
-                                db_conn.store_spend(&new_psbt);
-
-                                persister.update_metadata(
-                                    Some(PayjoinStatus::Completed),
-                                    Some(new_txid),
-                                    Some(new_psbt),
-                                    maybe_bip21,
-                                );
-                            }
-                        }
+                // TODO(arturgontijo): Restoring witness_scripts and bip32_derivation so GUI can sign them
+                for (index, psbtin) in proposal_psbt.inputs.iter_mut().enumerate() {
+                    let outpoint = &proposal_psbt.unsigned_tx.input[index].previous_output;
+                    if let Some(input) = input_fields_to_restore.get(outpoint) {
+                        *psbtin = input.clone();
                     }
                 }
-                Err(e) => log::warn!("payjoin_sender_check(): {}", e),
-            },
-            _ => {}
+
+                let new_txid = proposal_psbt.unsigned_tx.compute_txid();
+                log::info!(
+                    "[Payjoin] Updating Payjoin psbt: {} -> {}",
+                    original_txid,
+                    new_txid
+                );
+                db_conn.store_spend(&proposal_psbt);
+            }
+            Ok(None) => {
+                log::info!("[Payjoin] Proposal not received yet...");
+            }
+            Err(e) => log::warn!("payjoin_sender_check(): {}", e),
         }
     }
 }
