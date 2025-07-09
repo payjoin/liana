@@ -11,6 +11,7 @@ use crate::{
     payjoin::{
         db::{ReceiverPersister, SenderPersister},
         helpers::{fetch_ohttp_keys, FetchOhttpKeysError},
+        types::PayjoinInfo,
     },
     poller::PollerMessage,
     DaemonControl, VERSION,
@@ -49,8 +50,8 @@ use miniscript::{
 };
 use payjoin::{
     bitcoin::{key::Secp256k1, FeeRate},
-    receive::v2::{Receiver, UninitializedReceiver},
-    send::v2::SenderBuilder,
+    receive::v2::{replay_event_log as replay_receiver_event_log, Receiver, UninitializedReceiver},
+    send::v2::{replay_event_log as replay_sender_event_log, SenderBuilder},
     Uri, UriExt,
 };
 use serde::{Deserialize, Serialize};
@@ -453,6 +454,55 @@ impl DaemonControl {
             .unwrap();
 
         Ok(())
+    }
+
+    /// Get Payjoin URI (BIP21) and its sender/receiver status by txid
+    /// TODO: this seems unused, can we remove it?
+    pub fn get_payjoin_info(
+        &self,
+        txid: &bitcoin::Txid,
+    ) -> Result<Option<PayjoinInfo>, CommandError> {
+        let mut db_conn = self.db.connection();
+
+        for session_id in db_conn.get_all_receiver_session_ids() {
+            let persister =
+                ReceiverPersister::from_id(Arc::new(self.db.clone()), session_id.clone());
+            let (state, history) = replay_receiver_event_log(&persister).unwrap();
+            let original_txid = history.fallback_tx().map(|tx| tx.compute_txid());
+            if let Some(original_txid) = original_txid {
+                if original_txid == *txid {
+                    let bip21 = history
+                        .pj_uri()
+                        .expect("should exist at this point")
+                        .to_string();
+                    return Ok(Some(PayjoinInfo {
+                        bip21,
+                        status: state.into(),
+                    }));
+                }
+            }
+        }
+
+        for session_id in db_conn.get_all_sender_session_ids() {
+            let persister = SenderPersister::from_id(Arc::new(self.db.clone()), session_id.clone());
+            let (state, history) = replay_sender_event_log(&persister).unwrap();
+            let original_txid = history.fallback_tx().map(|tx| tx.compute_txid());
+            if let Some(original_txid) = original_txid {
+                if original_txid == *txid {
+                    // TODO: this isnt a bip21, but a payjoin endpoint. Does this need to get returned?
+                    let bip21 = history
+                        .endpoint()
+                        .expect("should exist at this point")
+                        .to_string();
+                    return Ok(Some(PayjoinInfo {
+                        bip21,
+                        status: state.into(),
+                    }));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     /// Update derivation indexes

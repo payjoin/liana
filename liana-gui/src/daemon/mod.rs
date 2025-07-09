@@ -18,6 +18,7 @@ use liana::miniscript::bitcoin::{
 };
 use lianad::bip329::Labels;
 use lianad::commands::UpdateDerivIndexesResult;
+use lianad::payjoin::types::PayjoinInfo;
 use lianad::{
     commands::{CoinStatus, LabelItem, TransactionInfo},
     config::Config,
@@ -116,6 +117,7 @@ pub trait Daemon: Debug {
     ) -> Result<model::ListRevealedAddressesResult, DaemonError>;
     async fn receive_payjoin(&self) -> Result<model::GetAddressResult, DaemonError>;
     async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError>;
+    async fn get_payjoin_info(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError>;
     async fn update_deriv_indexes(
         &self,
         receive: Option<u32>,
@@ -210,11 +212,9 @@ pub trait Daemon: Debug {
                 .cloned()
                 .collect();
 
-            // TODO: get payjoin info if a session exists for this transaction
-            // Status should be derived from replaying the session
-            // let payjoin_info = self
-            //     .get_payjoin_info(&tx.psbt.unsigned_tx.compute_txid())
-            //     .await?;
+            let payjoin_info = self
+                .get_payjoin_info(&tx.psbt.unsigned_tx.compute_txid())
+                .await?;
 
             spend_txs.push(model::SpendTx::new(
                 tx.updated_at,
@@ -223,7 +223,7 @@ pub trait Daemon: Debug {
                 &info.descriptors.main,
                 &curve,
                 info.network,
-                None, // Payjoin status
+                payjoin_info,
             ));
         }
         load_labels(self, &mut spend_txs).await?;
