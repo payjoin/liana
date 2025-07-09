@@ -1,4 +1,4 @@
-use std::{error::Error, time::Duration};
+use std::time::Duration;
 
 use miniscript::{
     bitcoin::{secp256k1, Psbt, ScriptBuf, TxOut},
@@ -14,48 +14,74 @@ pub fn http_agent() -> reqwest::blocking::Client {
     reqwest::blocking::Client::new()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchOhttpKeysError {
+    Reqwest(String),
+    InvalidOhttpKeys(String),
+    InvalidUrl(String),
+    UrlParseError,
+    UnexpectedStatusCode(reqwest::StatusCode),
+}
+
+impl std::error::Error for FetchOhttpKeysError {}
+impl std::fmt::Display for FetchOhttpKeysError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
 pub fn fetch_ohttp_keys(
     ohttp_relay: impl IntoUrl,
     payjoin_directory: impl IntoUrl,
-) -> Result<OhttpKeys, Box<dyn Error + Send + Sync>> {
-    let ohttp_keys_url = payjoin_directory
-        .into_url()?
-        .join("/.well-known/ohttp-gateway")?;
-    let proxy = Proxy::all(ohttp_relay.into_url()?.as_str())?;
-    let client = reqwest::blocking::Client::builder().proxy(proxy).build()?;
+) -> Result<OhttpKeys, FetchOhttpKeysError> {
+    let payjoin_directory_str = payjoin_directory.as_str().to_string();
+    let payjoin_directory_url = payjoin_directory
+        .into_url()
+        .map_err(|_| FetchOhttpKeysError::InvalidUrl(payjoin_directory_str.clone()))?
+        .join("/.well-known/ohttp-gateway")
+        .map_err(|_| FetchOhttpKeysError::UrlParseError)?;
+
+    let ohttp_relay_str = ohttp_relay.as_str().to_string();
+    let proxy = Proxy::all(
+        ohttp_relay
+            .into_url()
+            .map_err(|_| FetchOhttpKeysError::InvalidUrl(ohttp_relay_str.clone()))?
+            .as_str(),
+    )
+    .map_err(|e| FetchOhttpKeysError::Reqwest(e.to_string()))?;
+    let client = reqwest::blocking::Client::builder()
+        .proxy(proxy)
+        .build()
+        .map_err(|e| FetchOhttpKeysError::Reqwest(e.to_string()))?;
     let res = client
-        .get(ohttp_keys_url)
+        .get(payjoin_directory_url)
         .header(ACCEPT, "application/ohttp-keys")
-        .send()?;
-    parse_ohttp_keys_response(res)
+        .send()
+        .map_err(|e| FetchOhttpKeysError::Reqwest(e.to_string()))?;
+    Ok(validate_ohttp_keys_response(res)?)
 }
 
-fn parse_ohttp_keys_response(
+fn validate_ohttp_keys_response(
     res: reqwest::blocking::Response,
-) -> Result<OhttpKeys, Box<dyn Error + Send + Sync>> {
+) -> Result<OhttpKeys, FetchOhttpKeysError> {
     if !res.status().is_success() {
-        return Err(format!("UnexpectedStatusCode: {}", res.status()).into());
+        return Err(FetchOhttpKeysError::UnexpectedStatusCode(res.status()));
     }
 
     let body = res.bytes().unwrap().to_vec();
     match OhttpKeys::decode(&body) {
         Ok(ohttp_keys) => Ok(ohttp_keys),
-        Err(err) => Err(format!("InvalidOhttpKeys: {}", err).into()),
+        Err(err) => Err(FetchOhttpKeysError::InvalidOhttpKeys(err.to_string())),
     }
 }
 
-pub fn post_request(req: payjoin::Request) -> Result<reqwest::blocking::Response, Box<dyn Error>> {
+pub fn post_request(req: payjoin::Request) -> Result<reqwest::blocking::Response, reqwest::Error> {
     let http = http_agent();
-    match http
-        .post(req.url)
+    http.post(req.url)
         .header("Content-Type", req.content_type)
         .body(req.body)
         .timeout(Duration::from_secs(10))
         .send()
-    {
-        Ok(r) => Ok(r),
-        Err(err) => Err(format!("Failed to post_reques(): {}", err).into()),
-    }
 }
 
 pub fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>) {

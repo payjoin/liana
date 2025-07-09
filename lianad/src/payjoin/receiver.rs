@@ -8,14 +8,14 @@ use liana::descriptors;
 
 use payjoin::{
     bitcoin::{
-        consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence,
-        TxIn,
+        consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence, TxIn,
     },
     persist::OptionalTransitionOutcome,
     receive::{
         v2::{
-            replay_event_log, Initialized, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown, PayjoinProposal, ProvisionalProposal,
-            ReceiveSession, Receiver, SessionHistory, UncheckedProposal, WantsInputs, WantsOutputs
+            replay_event_log, Initialized, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown,
+            PayjoinProposal, ProvisionalProposal, ReceiveSession, Receiver, SessionHistory,
+            UncheckedProposal, WantsInputs, WantsOutputs,
         },
         InputPair,
     },
@@ -63,7 +63,7 @@ fn read_from_directory(
                 Err(e) => return Err(e.into()),
             }
         }
-        Err(e) => return Err(e),
+        Err(e) => return Err(Box::new(e)),
     };
     check_proposal(proposal, persister, db_conn, bit, desc, secp)
 }
@@ -304,8 +304,7 @@ fn process_receiver_session(
 
         log::info!("[Payjoin] {:?}: bip21={:?}", status, maybe_bip21);
 
-        let persister =
-            ReceiverPersister::from_id(Arc::new(db.clone()), session_id.clone()).unwrap();
+        let persister = ReceiverPersister::from_id(Arc::new(db.clone()), session_id.clone());
 
         let (state, history) = replay_event_log(&persister)
             .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))

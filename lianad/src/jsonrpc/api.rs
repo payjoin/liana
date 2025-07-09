@@ -487,7 +487,7 @@ fn get_labels_bip329(control: &DaemonControl, params: Params) -> Result<serde_js
 }
 
 fn receive_payjoin(control: &DaemonControl) -> Result<serde_json::Value, Error> {
-    let res = control.receive_payjoin();
+    let res = control.receive_payjoin()?;
     Ok(serde_json::json!(&res))
 }
 
@@ -514,7 +514,8 @@ fn get_payjoin_info(control: &DaemonControl, params: Params) -> Result<serde_jso
         .ok_or_else(|| Error::invalid_params("Missing 'txid' parameter."))?
         .as_str()
         .ok_or_else(|| Error::invalid_params("Invalid 'txid' parameter."))?;
-    let txid = bitcoin::Txid::from_str(txid).map_err(|_| Error::invalid_params("Invalid 'txid' parameter."))?;
+    let txid = bitcoin::Txid::from_str(txid)
+        .map_err(|_| Error::invalid_params("Invalid 'txid' parameter."))?;
     let res = control.get_payjoin_info(&txid)?;
     Ok(serde_json::json!(&res))
 }

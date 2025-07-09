@@ -10,7 +10,7 @@ use crate::{
     miniscript::bitcoin::absolute::LockTime,
     payjoin::{
         db::{ReceiverPersister, SenderPersister, SessionId, SessionMetadata, SessionWrapper},
-        helpers::fetch_ohttp_keys,
+        helpers::{fetch_ohttp_keys, FetchOhttpKeysError},
         types::{PayjoinInfo, PayjoinStatus},
     },
     poller::PollerMessage,
@@ -85,6 +85,9 @@ pub enum CommandError {
     InvalidDerivationIndex,
     RbfError(RbfErrorInfo),
     EmptyFilterList,
+    FailedToFetchOhttpKeys(FetchOhttpKeysError),
+    // Same FIXME as `SpendFinalization`
+    FailedToPostOriginalPayjoinProposal(String),
 }
 
 impl fmt::Display for CommandError {
@@ -143,6 +146,10 @@ impl fmt::Display for CommandError {
             }
             Self::RbfError(e) => write!(f, "RBF error: '{}'.", e),
             Self::EmptyFilterList => write!(f, "Filter list is empty, should supply None instead."),
+            Self::FailedToFetchOhttpKeys(e) => write!(f, "Failed to fetch OHTTP keys: '{}'.", e),
+            Self::FailedToPostOriginalPayjoinProposal(e) => {
+                write!(f, "Failed to post original payjoin proposal: '{}'.", e)
+            }
         }
     }
 }
@@ -373,7 +380,7 @@ impl DaemonControl {
         GetAddressResult::new(address, new_index, "".to_string())
     }
 
-    pub fn receive_payjoin(&self) -> GetAddressResult {
+    pub fn receive_payjoin(&self) -> Result<GetAddressResult, CommandError> {
         let mut db_conn = self.db.connection();
 
         // TODO(arturgontijo): Fetch these from DB (via GUI's Settings Panel)
@@ -386,7 +393,7 @@ impl DaemonControl {
             let ohttp_keys = std::thread::spawn(move || fetch_ohttp_keys(ohttp_relay, directory))
                 .join()
                 .unwrap()
-                .unwrap();
+                .map_err(CommandError::FailedToFetchOhttpKeys)?;
             db_conn.payjoin_save_ohttp_keys(ohttp_relay, ohttp_keys.clone());
             ohttp_keys
         };
@@ -403,7 +410,7 @@ impl DaemonControl {
             .derive(new_index, &self.secp)
             .address(self.config.bitcoin_config.network);
 
-        let persister = ReceiverPersister::new(Arc::new(self.db.clone())).unwrap();
+        let persister = ReceiverPersister::new(Arc::new(self.db.clone()));
         let session = Receiver::<UninitializedReceiver>::create_session(
             address.clone(),
             directory,
@@ -413,11 +420,18 @@ impl DaemonControl {
         .save(&persister)
         .unwrap();
 
-        GetAddressResult::new(address, new_index, session.pj_uri().to_string())
+        Ok(GetAddressResult::new(
+            address,
+            new_index,
+            session.pj_uri().to_string(),
+        ))
     }
 
     /// Initiate a payjoin sender
+    // TODO bip21 should be a uri not a string
+    // TODO: min fee rate should be a param
     pub fn init_payjoin_sender(&self, bip21: String, psbt: &Psbt) -> Result<(), CommandError> {
+        // TODO: validate bip21 in uri
         let uri = Uri::try_from(bip21.clone())
             .map_err(|e| format!("Failed to create URI from BIP21: {}", e))
             .unwrap();
@@ -428,9 +442,11 @@ impl DaemonControl {
             .unwrap();
 
         let mut psbt = psbt.clone();
-        psbt.finalize_mut(&Secp256k1::verification_only()).unwrap();
+        psbt.finalize_mut(&Secp256k1::verification_only())
+            // Just display the first error
+            .map_err(|e| CommandError::FailedToPostOriginalPayjoinProposal(e[0].to_string()))?;
 
-        let persister = SenderPersister::new(Arc::new(self.db.clone())).unwrap();
+        let persister = SenderPersister::new(Arc::new(self.db.clone()));
         let _sender = SenderBuilder::new(psbt.clone(), uri)
             .build_recommended(FeeRate::BROADCAST_MIN)
             .save(&persister)
@@ -447,6 +463,7 @@ impl DaemonControl {
     }
 
     /// Get Payjoin URI (BIP21) and its sender/receiver status by txid
+    /// TODO: this seems unused, can we remove it?
     pub fn get_payjoin_info(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, CommandError> {
         let mut db_conn = self.db.connection();
 
@@ -492,13 +509,16 @@ impl DaemonControl {
         }
     }
 
-    pub fn payjoin_get_all_receiver_sessions(&self) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)> {
+    pub fn payjoin_get_all_receiver_sessions(
+        &self,
+    ) -> Vec<(SessionId, SessionWrapper<ReceiverSessionEvent>)> {
         let mut db_conn = self.db.connection();
         db_conn.payjoin_get_all_receiver_sessions()
     }
 
-    pub fn payjoin_get_receiver_session(&self, session_id: &SessionId) -> Option<ReceiverPersister> {
-        ReceiverPersister::from_id(Arc::new(self.db.clone()), session_id.clone()).ok()
+    // TODO: is this unused? Can we remove it?
+    pub fn payjoin_get_receiver_session(&self, session_id: &SessionId) -> ReceiverPersister {
+        ReceiverPersister::from_id(Arc::new(self.db.clone()), session_id.clone())
     }
 
     /// Update derivation indexes
@@ -1517,6 +1537,7 @@ impl GetAddressResult {
     pub fn new(
         address: bitcoin::Address,
         derivation_index: bip32::ChildNumber,
+        // TODO: rename to bip21
         payjoin_uri: String,
     ) -> Self {
         Self {

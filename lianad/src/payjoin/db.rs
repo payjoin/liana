@@ -3,7 +3,6 @@ use payjoin::persist::SessionPersister;
 use payjoin::receive::v2::SessionEvent as ReceiverSessionEvent;
 use payjoin::send::v2::SessionEvent as SenderSessionEvent;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 use std::time::SystemTime;

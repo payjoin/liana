@@ -9,8 +9,8 @@ use std::sync::{self, Arc};
 
 use payjoin::bitcoin::Psbt;
 use payjoin::persist::OptionalTransitionOutcome;
-use payjoin::send::v2::{Sender, WithReplyKey};
 use payjoin::send::v2::{replay_event_log, SendSession, V2GetContext};
+use payjoin::send::v2::{Sender, WithReplyKey};
 
 use super::db::SenderPersister;
 use super::helpers::OHTTP_RELAY;
@@ -19,6 +19,7 @@ use super::types::PayjoinStatus;
 fn get_proposed_payjoin_psbt(
     context: Sender<V2GetContext>,
     persister: &SenderPersister,
+    // TODO: replace with specific error
 ) -> Result<Option<Psbt>, Box<dyn Error>> {
     let (req, ctx) = context.extract_req(OHTTP_RELAY)?;
     match post_request(req) {
@@ -41,7 +42,7 @@ fn get_proposed_payjoin_psbt(
                 }
             }
         }
-        Err(e) => Err(e),
+        Err(e) => Err(Box::new(e)),
     }
 }
 
@@ -58,7 +59,7 @@ fn post_orginal_proposal(
                 .save(persister)?;
             Ok(())
         }
-        Err(e) => Err(e),
+        Err(e) => Err(Box::new(e)),
     }
 }
 
@@ -107,7 +108,7 @@ pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) 
 
         log::info!("[Payjoin] {:?}: bip21={:?}", status, maybe_bip21);
 
-        let persister = SenderPersister::from_id(Arc::new(db.clone()), session_id.clone()).unwrap();
+        let persister = SenderPersister::from_id(Arc::new(db.clone()), session_id.clone());
 
         let (state, _) = replay_event_log(&persister)
             .map_err(|e| format!("Failed to replay sender event log: {:?}", e))

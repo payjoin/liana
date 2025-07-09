@@ -122,7 +122,12 @@ impl Daemon for EmbeddedDaemon {
     }
 
     async fn receive_payjoin(&self) -> Result<GetAddressResult, DaemonError> {
-        self.command(|daemon| Ok(daemon.receive_payjoin())).await
+        self.command(|daemon| {
+            daemon
+                .receive_payjoin()
+                .map_err(|e| DaemonError::Unexpected(e.to_string()))
+        })
+        .await
     }
 
     async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError> {
