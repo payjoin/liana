@@ -205,7 +205,7 @@ impl SpendTx {
 
         // TODO(arturgontijo): We should count the sigs, just in case.
         if let Some(payjoin_info) = &self.payjoin_info {
-            if let Some(PayjoinStatus::Completed) = payjoin_info.sender_status {
+            if let Some(PayjoinStatus::Completed) = payjoin_info.status {
                 let has_sigs = self
                     .psbt
                     .inputs

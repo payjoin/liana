@@ -424,7 +424,7 @@ pub fn spend_overview_view<'a>(
                     })
                     .push_maybe(if tx.path_ready().is_some() {
                         if let Some(payjoin_info) = &tx.payjoin_info {
-                            if payjoin_info.sender_status.is_none() {
+                            if payjoin_info.status.is_none() {
                                 Some(
                                     button::secondary(None, "Send Payjoin")
                                         .on_press(Message::Spend(SpendTxMessage::SendPayjoin))

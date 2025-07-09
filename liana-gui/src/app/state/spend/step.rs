@@ -994,8 +994,7 @@ impl Step for SaveSpend {
         } else {
             Some(PayjoinInfo {
                 bip21,
-                sender_status: None,
-                receiver_status: None,
+                status: None,
             })
         };
 

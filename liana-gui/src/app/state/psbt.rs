@@ -588,7 +588,7 @@ impl Modal for SignModal {
 
                         // TODO(arturgontijo): Use better design. Maybe checking for foreign inputs.
                         if let Some(payjoin_info) = &tx.payjoin_info {
-                            if payjoin_info.receiver_status == Some(PayjoinStatus::Signing) {
+                            if payjoin_info.status == Some(PayjoinStatus::Signing) {
                                 tx.status = SpendStatus::PayjoinProposalReady;
                             }
                         }
