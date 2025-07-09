@@ -62,7 +62,7 @@ pub struct ReceiverPersister {
 }
 
 impl ReceiverPersister {
-    pub fn new(db: Arc<dyn DatabaseInterface>) -> Result<Self, Box<dyn Error>> {
+    pub fn new(db: Arc<dyn DatabaseInterface>) -> Self {
         let mut db_conn = db.connection();
         let session_id = SessionId::new(db_conn.payjoin_next_id("payjoin_receivers"));
         let session: SessionWrapper<ReceiverSessionEvent> = SessionWrapper {
@@ -76,11 +76,11 @@ impl ReceiverPersister {
             completed_at: None,
         };
         db_conn.payjoin_save_receiver_session(&session_id, session);
-        Ok(Self { db, session_id })
+        Self { db, session_id }
     }
 
-    pub fn from_id(db: Arc<dyn DatabaseInterface>, id: SessionId) -> Result<Self, Box<dyn Error>> {
-        Ok(Self { db, session_id: id })
+    pub fn from_id(db: Arc<dyn DatabaseInterface>, id: SessionId) -> Self {
+        Self { db, session_id: id }
     }
 
     pub fn update_metadata(
@@ -149,7 +149,7 @@ pub struct SenderPersister {
 }
 
 impl SenderPersister {
-    pub fn new(db: Arc<dyn DatabaseInterface>) -> Result<Self, Box<dyn Error>> {
+    pub fn new(db: Arc<dyn DatabaseInterface>) -> Self {
         let mut db_conn = db.connection();
         let session_id = SessionId::new(db_conn.payjoin_next_id("payjoin_senders"));
         let session: SessionWrapper<SenderSessionEvent> = SessionWrapper {
@@ -163,11 +163,11 @@ impl SenderPersister {
             completed_at: None,
         };
         db_conn.payjoin_save_sender_session(&session_id, session);
-        Ok(Self { db, session_id })
+        Self { db, session_id }
     }
 
-    pub fn from_id(db: Arc<dyn DatabaseInterface>, id: SessionId) -> Result<Self, Box<dyn Error>> {
-        Ok(Self { db, session_id: id })
+    pub fn from_id(db: Arc<dyn DatabaseInterface>, id: SessionId) -> Self {
+        Self { db, session_id: id }
     }
 
     pub fn update_metadata(

@@ -23,7 +23,10 @@ use std::{
 
 use bip329::Labels;
 use miniscript::bitcoin::{self, bip32, psbt::Psbt, secp256k1, Address, Network, OutPoint, Txid};
-use payjoin::{receive::v2::SessionEvent as ReceiverSessionEvent, send::v2::SessionEvent as SenderSessionEvent, OhttpKeys};
+use payjoin::{
+    receive::v2::SessionEvent as ReceiverSessionEvent,
+    send::v2::SessionEvent as SenderSessionEvent, OhttpKeys,
+};
 
 /// Information about the wallet.
 ///
