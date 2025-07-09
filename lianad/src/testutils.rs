@@ -9,7 +9,10 @@ use crate::{
     DaemonControl, DaemonHandle,
 };
 use liana::descriptors;
-use payjoin::{receive::v2::SessionEvent as ReceiverSessionEvent, send::v2::SessionEvent as SenderSessionEvent, OhttpKeys};
+use payjoin::{
+    receive::v2::SessionEvent as ReceiverSessionEvent,
+    send::v2::SessionEvent as SenderSessionEvent, OhttpKeys,
+};
 
 use std::convert::TryInto;
 use std::{

@@ -28,7 +28,10 @@ use crate::{
     payjoin::db::{SessionId, SessionWrapper},
 };
 use liana::descriptors::LianaDescriptor;
-use payjoin::{receive::v2::SessionEvent as ReceiverSessionEvent, send::v2::SessionEvent as SenderSessionEvent, OhttpKeys};
+use payjoin::{
+    receive::v2::SessionEvent as ReceiverSessionEvent,
+    send::v2::SessionEvent as SenderSessionEvent, OhttpKeys,
+};
 
 use std::{
     cmp,

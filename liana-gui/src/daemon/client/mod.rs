@@ -113,7 +113,8 @@ impl<C: Client + Send + Sync + Debug> Daemon for Lianad<C> {
     }
 
     async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError> {
-        let _res: serde_json::value::Value = self.call("sendpayjoin", Some(vec![bip21, psbt.to_string()]))?;
+        let _res: serde_json::value::Value =
+            self.call("sendpayjoin", Some(vec![bip21, psbt.to_string()]))?;
         Ok(())
     }
 
