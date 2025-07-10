@@ -125,6 +125,7 @@ pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) 
                     input_fields_to_restore.insert(txin.previous_output, input_without_sigs);
                 }
                 let original_txid = original_psbt.unsigned_tx.compute_txid();
+                // TODO: should we be deleting the original psbt?  can we fallback without it?
                 log::info!("[Payjoin] Deleting original Payjoin psbt (txid={original_txid})");
                 db_conn.delete_spend(&original_txid);
 
@@ -136,7 +137,12 @@ pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) 
                     }
                 }
 
+                // TODO: need a check here to see if this proposal already exists in the db
                 let new_txid = proposal_psbt.unsigned_tx.compute_txid();
+                if db_conn.spend_tx(&new_txid).is_some() {
+                    log::info!("[Payjoin] Proposal already exists in the db");
+                    return;
+                }
                 log::info!(
                     "[Payjoin] Updating Payjoin psbt: {} -> {}",
                     original_txid,
