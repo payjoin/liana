@@ -18,7 +18,10 @@ use liana::{
     },
     spend::{SpendCreationError, MAX_FEERATE},
 };
-use lianad::{commands::ListCoinsEntry, payjoin::types::PayjoinInfo};
+use lianad::{
+    commands::ListCoinsEntry,
+    payjoin::types::{PayjoinInfo, PayjoinStatus},
+};
 
 use liana_ui::{component::form, widget::Element};
 use payjoin::Uri;
@@ -992,9 +995,10 @@ impl Step for SaveSpend {
         let payjoin_info = if bip21.is_empty() {
             None
         } else {
+            // TODO: this seems wrong. The presence of a bip21 doesnt mean its a payjoin
             Some(PayjoinInfo {
                 bip21,
-                status: None,
+                status: PayjoinStatus::Pending,
             })
         };
 

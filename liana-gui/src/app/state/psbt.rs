@@ -12,7 +12,6 @@ use lianad::commands::CoinStatus;
 
 use liana_ui::component::toast;
 use liana_ui::{component::modal, widget::Element};
-use lianad::payjoin::types::PayjoinStatus;
 
 use crate::daemon::model::LabelsLoader;
 use crate::export::{ImportExportMessage, ImportExportType, Progress};
@@ -585,13 +584,6 @@ impl Modal for SignModal {
                         self.signed.insert(fingerprint);
                         let daemon = daemon.clone();
                         merge_signatures(&mut tx.psbt, &psbt);
-
-                        // TODO(arturgontijo): Use better design. Maybe checking for foreign inputs.
-                        if let Some(payjoin_info) = &tx.payjoin_info {
-                            if payjoin_info.status == Some(PayjoinStatus::Signing) {
-                                tx.status = SpendStatus::PayjoinProposalReady;
-                            }
-                        }
 
                         if self.is_saved {
                             return Task::perform(
