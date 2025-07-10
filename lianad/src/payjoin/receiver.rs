@@ -8,7 +8,8 @@ use liana::descriptors;
 
 use payjoin::{
     bitcoin::{
-        consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence, TxIn,
+        consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence,
+        TxIn, Weight,
     },
     persist::OptionalTransitionOutcome,
     receive::{
@@ -148,7 +149,7 @@ fn contribute_inputs(
 ) -> Result<(), Box<dyn Error>> {
     let coins = db_conn.coins(&[CoinStatus::Confirmed], &[]);
 
-    let mut candidate_inputs_map = HashMap::<OutPoint, (Coin, TxIn, Input)>::new();
+    let mut candidate_inputs_map = HashMap::<OutPoint, (Coin, TxIn, Input, Weight)>::new();
     for (outpoint, coin) in coins.iter() {
         let txs = db_conn.list_wallet_transactions(&[outpoint.txid]);
         let (db_tx, _, _) = txs.first().unwrap();
@@ -177,13 +178,16 @@ fn contribute_inputs(
         };
 
         derived_desc.update_psbt_in(&mut psbtin);
+        let worse_case_weight = Weight::from_wu_usize(desc.max_sat_weight(true));
 
-        candidate_inputs_map.insert(*outpoint, (*coin, txin, psbtin));
+        candidate_inputs_map.insert(*outpoint, (*coin, txin, psbtin, worse_case_weight));
     }
 
     let candidate_inputs = candidate_inputs_map
         .values()
-        .map(|(_, txin, psbtin)| InputPair::new(txin.clone(), psbtin.clone()).unwrap());
+        .map(|(_, txin, psbtin, weight)| {
+            InputPair::new(txin.clone(), psbtin.clone(), Some(*weight)).unwrap()
+        });
 
     let selected_input = proposal.try_preserving_privacy(candidate_inputs).unwrap();
 
