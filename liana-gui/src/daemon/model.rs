@@ -15,7 +15,7 @@ pub use lianad::commands::{
     ListCoinsResult, ListRevealedAddressesEntry, ListRevealedAddressesResult, ListSpendEntry,
     ListSpendResult, ListTransactionsResult, TransactionInfo,
 };
-use lianad::payjoin::types::{PayjoinInfo, PayjoinStatus};
+use lianad::payjoin::types::PayjoinInfo;
 
 pub type Coin = ListCoinsEntry;
 
@@ -203,19 +203,14 @@ impl SpendTx {
     pub fn path_ready(&self) -> Option<&PathSpendInfo> {
         let path = self.sigs.primary_path();
 
-        // TODO(arturgontijo): We should count the sigs, just in case.
-        if let Some(payjoin_info) = &self.payjoin_info {
-            if let Some(PayjoinStatus::Completed) = payjoin_info.status {
-                let has_sigs = self
-                    .psbt
-                    .inputs
-                    .iter()
-                    .any(|psbtin| !psbtin.partial_sigs.is_empty());
-                if has_sigs {
-                    return Some(path);
-                }
-            }
-        };
+        // Check if we have signatures for all of our inputs
+        let has_sigs =
+            self.psbt.inputs.iter().any(|psbtin| {
+                !psbtin.partial_sigs.is_empty() && !psbtin.bip32_derivation.is_empty()
+            });
+        if has_sigs {
+            return Some(path);
+        }
 
         if path.sigs_count >= path.threshold {
             return Some(path);
