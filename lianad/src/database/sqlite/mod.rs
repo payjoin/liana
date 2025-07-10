@@ -1051,7 +1051,7 @@ impl SqliteConn {
     pub fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
         db_query(
             &mut self.conn,
-            "SELECT session_id FROM payjoin_receivers WHERE completed_at IS NOT NULL",
+            "SELECT session_id FROM payjoin_receivers WHERE completed_at IS NULL",
             rusqlite::params![],
             |row| {
                 let id: u64 = row.get(0)?;
@@ -1113,7 +1113,7 @@ impl SqliteConn {
     pub fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {
         db_query(
             &mut self.conn,
-            "SELECT session_id FROM payjoin_senders",
+            "SELECT session_id FROM payjoin_senders WHERE completed_at IS NULL",
             rusqlite::params![],
             |row| {
                 let id: u64 = row.get(0)?;
