@@ -26,7 +26,7 @@ pub enum FetchOhttpKeysError {
 impl std::error::Error for FetchOhttpKeysError {}
 impl std::fmt::Display for FetchOhttpKeysError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -58,7 +58,7 @@ pub fn fetch_ohttp_keys(
         .header(ACCEPT, "application/ohttp-keys")
         .send()
         .map_err(|e| FetchOhttpKeysError::Reqwest(e.to_string()))?;
-    Ok(validate_ohttp_keys_response(res)?)
+    validate_ohttp_keys_response(res)
 }
 
 fn validate_ohttp_keys_response(
@@ -89,7 +89,7 @@ pub fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::Ver
     let mut inputs_to_finalize = vec![];
     for (index, input) in psbt.inputs.iter_mut().enumerate() {
         if input.witness_utxo.is_none() {
-            // Sender's wallet cleans this up (from original PSBT) but we need it to finalize_inp_mut() bellow
+            // Sender's wallet cleans this up (from original PSBT) but we need it to finalize_inp_mut() below
             input.witness_utxo = Some(TxOut {
                 value: Amount::ZERO,
                 script_pubkey: ScriptBuf::default(),
