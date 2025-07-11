@@ -8,7 +8,8 @@ use liana::descriptors;
 
 use payjoin::{
     bitcoin::{
-        consensus::encode::serialize_hex, psbt::Input, secp256k1, OutPoint, Sequence, TxIn, Weight,
+        consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence,
+        TxIn, Weight,
     },
     persist::OptionalTransitionOutcome,
     receive::{
@@ -171,29 +172,42 @@ fn contribute_inputs(
         };
 
         derived_desc.update_psbt_in(&mut psbtin);
-        let worse_case_weight = Weight::from_wu_usize(desc.max_sat_weight(true));
+        // TODO: revisit using primary path boolean. Perphaps we should use both paths and take the max.
+        let worse_case_weight = Weight::from_wu_usize(desc.max_sat_weight(true))
+            // Segwit marker
+            + Weight::from_wu(2)
+            // Non-witness data size
+            + Weight::from_non_witness_data_size(txin.base_size() as u64);
 
         candidate_inputs_map.insert(*outpoint, (*coin, txin, psbtin, worse_case_weight));
     }
 
-    let candidate_inputs = candidate_inputs_map
+    let mut candidate_inputs = candidate_inputs_map
         .values()
         .map(|(_, txin, psbtin, weight)| {
             InputPair::new(txin.clone(), psbtin.clone(), Some(*weight)).unwrap()
         });
+    log::info!("[Payjoin] Candidate inputs: {:?}", candidate_inputs);
 
-    let selected_input = proposal.try_preserving_privacy(candidate_inputs).unwrap();
+    if candidate_inputs.len() == 0 {
+        return Err("No candidate inputs".into());
+    }
 
-    proposal
+    let selected_input = proposal
+        .try_preserving_privacy(candidate_inputs.clone())
+        .unwrap_or(
+            candidate_inputs
+                .next()
+                .expect("Should have at least one input")
+                .clone(),
+        );
+
+    let mut proposal = proposal
         .contribute_inputs(vec![selected_input])?
         .commit_inputs()
         .save(persister)?;
 
-    let (_, history) = replay_event_log(persister)
-        .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))
-        .unwrap();
-
-    let psbt = history.psbt_with_contributed_inputs().unwrap();
+    let psbt = proposal.apply_fee(None, None).unwrap();
 
     db_conn.store_spend(&psbt);
     log::info!("[Payjoin] PSBT in the DB...");
@@ -207,36 +221,33 @@ fn finalize_proposal(
     db_conn: &mut Box<dyn DatabaseConnection>,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
-    let (_, history) = replay_event_log(persister)
-        .map_err(|e| format!("Failed to replay receiver event log: {:?}", e))?;
-
-    if let Some(proposed_psbt) = history.psbt_with_contributed_inputs() {
-        let txid = proposed_psbt.unsigned_tx.compute_txid();
-        if let Some(psbt) = db_conn.spend_tx(&txid) {
-            let mut is_signed = false;
-            for psbtin in &psbt.inputs {
-                if !psbtin.partial_sigs.is_empty() {
-                    log::debug!("[Payjoin] PSBT is signed!");
-                    is_signed = true;
-                    break;
-                }
+    let mut proposal = proposal;
+    let psbt = proposal.apply_fee(None, None)?;
+    let txid = psbt.unsigned_tx.compute_txid();
+    if let Some(psbt) = db_conn.spend_tx(&txid) {
+        let mut is_signed = false;
+        for psbtin in &psbt.inputs {
+            if !psbtin.partial_sigs.is_empty() {
+                log::debug!("[Payjoin] PSBT is signed!");
+                is_signed = true;
+                break;
             }
+        }
 
-            if is_signed {
-                let proposal = proposal
-                    .finalize_proposal(
-                        |_| {
-                            let mut psbt = psbt.clone();
-                            finalize_psbt(&mut psbt, secp);
-                            Ok(psbt)
-                        },
-                        None,
-                        None,
-                    )
-                    .save(persister)?;
+        if is_signed {
+            let proposal = proposal
+                .finalize_proposal(
+                    |_| {
+                        let mut psbt = psbt.clone();
+                        finalize_psbt(&mut psbt, secp);
+                        Ok(psbt)
+                    },
+                    None,
+                    Some(FeeRate::from_sat_per_vb_unchecked(50)),
+                )
+                .save(persister)?;
 
-                send_payjoin_proposal(proposal, persister)?;
-            }
+            send_payjoin_proposal(proposal, persister)?;
         }
     }
     Ok(())
