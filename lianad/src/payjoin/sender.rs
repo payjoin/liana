@@ -129,7 +129,7 @@ pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) 
                 log::info!("[Payjoin] Deleting original Payjoin psbt (txid={original_txid})");
                 db_conn.delete_spend(&original_txid);
 
-                // TODO(arturgontijo): Restoring witness_scripts and bip32_derivation so GUI can sign them
+                // Restoring witness_scripts and bip32_derivation so GUI can sign them
                 for (index, psbtin) in proposal_psbt.inputs.iter_mut().enumerate() {
                     let outpoint = &proposal_psbt.unsigned_tx.input[index].previous_output;
                     if let Some(input) = input_fields_to_restore.get(outpoint) {

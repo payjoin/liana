@@ -209,7 +209,7 @@ fn contribute_inputs(
 
     let psbt = proposal.apply_fee(None, None).unwrap();
 
-    db_conn.store_spend(&psbt);
+    db_conn.store_spend(psbt);
     log::info!("[Payjoin] PSBT in the DB...");
 
     Ok(())
