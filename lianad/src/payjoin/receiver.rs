@@ -4,11 +4,12 @@ use std::{
     sync::{self, Arc},
 };
 
-use liana::descriptors;
+use liana::{descriptors, spend::AddrInfo};
 
 use payjoin::{
     bitcoin::{
-        consensus::encode::serialize_hex, psbt::Input, secp256k1, OutPoint, Sequence, TxIn, Weight,
+        self, consensus::encode::serialize_hex, psbt::Input, secp256k1, OutPoint, Sequence, TxIn,
+        Weight,
     },
     persist::OptionalTransitionOutcome,
     receive::{
@@ -89,7 +90,13 @@ fn check_inputs_not_owned(
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal
-        .check_inputs_not_owned(|_| Ok(false))
+        .check_inputs_not_owned(|script| {
+            let address = bitcoin::Address::from_script(script, db_conn.network()).unwrap();
+            Ok(db_conn
+                .derivation_index_by_address(&address)
+                .map(|(index, is_change)| AddrInfo { index, is_change })
+                .is_some())
+        })
         .save(persister)?;
     check_no_inputs_seen_before(proposal, persister, db_conn, desc, secp)
 }
@@ -102,6 +109,8 @@ fn check_no_inputs_seen_before(
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal
+        // TODO implement check_no_inputs_seen_before callback and add new table to mark relevant
+        // outpoint as seen for the future
         .check_no_inputs_seen_before(|_| Ok(false))
         .save(persister)?;
     identify_receiver_outputs(proposal, persister, db_conn, desc, secp)
@@ -115,7 +124,13 @@ fn identify_receiver_outputs(
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal
-        .identify_receiver_outputs(|_| Ok(true))
+        .identify_receiver_outputs(|script| {
+            let address = bitcoin::Address::from_script(script, db_conn.network()).unwrap();
+            Ok(db_conn
+                .derivation_index_by_address(&address)
+                .map(|(index, is_change)| AddrInfo { index, is_change })
+                .is_some())
+        })
         .save(persister)?;
     commit_outputs(proposal, persister, db_conn, desc, secp)
 }
