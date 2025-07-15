@@ -19,7 +19,8 @@ impl From<ReceiveSession> for PayjoinStatus {
             | ReceiveSession::MaybeInputsSeen(_)
             | ReceiveSession::OutputsUnknown(_)
             | ReceiveSession::WantsOutputs(_)
-            | ReceiveSession::WantsInputs(_) => PayjoinStatus::Pending,
+            | ReceiveSession::WantsInputs(_)
+            | ReceiveSession::WantsFeeRange(_) => PayjoinStatus::Pending,
             ReceiveSession::ProvisionalProposal(_) => PayjoinStatus::WaitingToSign,
             ReceiveSession::PayjoinProposal(_) => PayjoinStatus::Success,
             ReceiveSession::TerminalFailure => PayjoinStatus::Failed,
