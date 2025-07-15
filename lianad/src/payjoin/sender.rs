@@ -19,7 +19,7 @@ fn get_proposed_payjoin_psbt(
     persister: &SenderPersister,
     // TODO: replace with specific error
 ) -> Result<Option<Psbt>, Box<dyn Error>> {
-    let (req, ctx) = context.extract_req(OHTTP_RELAY)?;
+    let (req, ctx) = context.create_poll_request(OHTTP_RELAY)?;
     match post_request(req) {
         Ok(resp) => {
             let res = context
@@ -48,7 +48,7 @@ fn post_orginal_proposal(
     sender: Sender<WithReplyKey>,
     persister: &SenderPersister,
 ) -> Result<(), Box<dyn Error>> {
-    let (req, ctx) = sender.extract_v2(OHTTP_RELAY)?;
+    let (req, ctx) = sender.create_v2_post_request(OHTTP_RELAY)?;
     match post_request(req) {
         Ok(resp) => {
             log::info!("[Payjoin] Posted original proposal...");

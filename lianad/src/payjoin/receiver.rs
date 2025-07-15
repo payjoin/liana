@@ -8,15 +8,14 @@ use liana::descriptors;
 
 use payjoin::{
     bitcoin::{
-        consensus::encode::serialize_hex, psbt::Input, secp256k1, FeeRate, OutPoint, Sequence,
-        TxIn, Weight,
+        consensus::encode::serialize_hex, psbt::Input, secp256k1, OutPoint, Sequence, TxIn, Weight,
     },
     persist::OptionalTransitionOutcome,
     receive::{
         v2::{
             replay_event_log, Initialized, MaybeInputsOwned, MaybeInputsSeen, OutputsUnknown,
             PayjoinProposal, ProvisionalProposal, ReceiveSession, Receiver, UncheckedProposal,
-            WantsInputs, WantsOutputs,
+            WantsFeeRange, WantsInputs, WantsOutputs,
         },
         InputPair,
     },
@@ -40,13 +39,13 @@ fn read_from_directory(
 ) -> Result<(), Box<dyn Error>> {
     let mut receiver = receiver;
     let (req, context) = receiver
-        .extract_req(OHTTP_RELAY)
+        .create_poll_request(OHTTP_RELAY)
         .expect("Failed to extract request");
     let proposal = match post_request(req.clone()) {
         Ok(ohttp_response) => {
             let response_bytes = ohttp_response.bytes()?;
             let state_transition = receiver
-                .process_res(response_bytes.as_ref(), context)
+                .process_response(response_bytes.as_ref(), context)
                 .save(persister);
             match state_transition {
                 Ok(OptionalTransitionOutcome::Progress(next_state)) => next_state,
@@ -202,16 +201,31 @@ fn contribute_inputs(
                 .clone(),
         );
 
-    let mut proposal = proposal
+    let proposal = proposal
         .contribute_inputs(vec![selected_input])?
         .commit_inputs()
         .save(persister)?;
 
-    let psbt = proposal.apply_fee(None, None).unwrap();
+    apply_fee_range(proposal, persister, db_conn, secp)?;
+    Ok(())
+}
 
-    db_conn.store_spend(psbt);
+fn apply_fee_range(
+    proposal: Receiver<WantsFeeRange>,
+    persister: &ReceiverPersister,
+    db_conn: &mut Box<dyn DatabaseConnection>,
+    secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
+) -> Result<(), Box<dyn Error>> {
+    let proposal = proposal.apply_fee_range(None, None).save(persister)?;
+    let (_, session_history) = replay_event_log(persister)?;
+    let psbt = session_history
+        .psbt_ready_for_signing()
+        .expect("Just added fee applied psbt");
+
+    db_conn.store_spend(&psbt);
     log::info!("[Payjoin] PSBT in the DB...");
 
+    finalize_proposal(proposal, persister, db_conn, secp)?;
     Ok(())
 }
 
@@ -221,8 +235,12 @@ fn finalize_proposal(
     db_conn: &mut Box<dyn DatabaseConnection>,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
-    let mut proposal = proposal;
-    let psbt = proposal.apply_fee(None, None)?;
+    let proposal = proposal;
+    let (_, session_history) = replay_event_log(persister)?;
+    let psbt = session_history
+        .psbt_ready_for_signing()
+        .expect("Just added fee applied psbt");
+
     let txid = psbt.unsigned_tx.compute_txid();
     if let Some(psbt) = db_conn.spend_tx(&txid) {
         let mut is_signed = false;
@@ -236,15 +254,11 @@ fn finalize_proposal(
 
         if is_signed {
             let proposal = proposal
-                .finalize_proposal(
-                    |_| {
-                        let mut psbt = psbt.clone();
-                        finalize_psbt(&mut psbt, secp);
-                        Ok(psbt)
-                    },
-                    None,
-                    Some(FeeRate::from_sat_per_vb_unchecked(50)),
-                )
+                .finalize_proposal(|_| {
+                    let mut psbt = psbt.clone();
+                    finalize_psbt(&mut psbt, secp);
+                    Ok(psbt)
+                })
                 .save(persister)?;
 
             send_payjoin_proposal(proposal, persister)?;
@@ -258,7 +272,7 @@ fn send_payjoin_proposal(
     persister: &ReceiverPersister,
 ) -> Result<(), Box<dyn Error>> {
     let (req, ctx) = proposal
-        .extract_req(OHTTP_RELAY)
+        .create_post_request(OHTTP_RELAY)
         .expect("Failed to extract request");
 
     // Respond to sender
@@ -266,7 +280,7 @@ fn send_payjoin_proposal(
     match post_request(req) {
         Ok(resp) => {
             proposal
-                .process_res(resp.bytes().expect("Failed to read response").as_ref(), ctx)
+                .process_response(resp.bytes().expect("Failed to read response").as_ref(), ctx)
                 .save(persister)?;
         }
         Err(err) => log::error!("[Payjoin] send_payjoin_proposal(): {}", err),
