@@ -8,10 +8,10 @@ use std::sync::Arc;
 use crate::database::DatabaseInterface;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionId(pub u64);
+pub struct SessionId(pub i64);
 
 impl SessionId {
-    pub fn new(id: u64) -> Self {
+    pub fn new(id: i64) -> Self {
         Self(id)
     }
 }
@@ -44,9 +44,11 @@ pub struct ReceiverPersister {
 impl ReceiverPersister {
     pub fn new(db: Arc<dyn DatabaseInterface>) -> Self {
         let mut db_conn = db.connection();
-        let session_id = SessionId::new(db_conn.payjoin_next_id("payjoin_receivers"));
-        db_conn.save_new_payjoin_receiver_session(&session_id);
-        Self { db, session_id }
+        let session_id = db_conn.save_new_payjoin_receiver_session();
+        Self {
+            db,
+            session_id: SessionId(session_id),
+        }
     }
 
     pub fn from_id(db: Arc<dyn DatabaseInterface>, id: SessionId) -> Self {
@@ -98,9 +100,11 @@ pub struct SenderPersister {
 impl SenderPersister {
     pub fn new(db: Arc<dyn DatabaseInterface>) -> Self {
         let mut db_conn = db.connection();
-        let session_id = SessionId::new(db_conn.payjoin_next_id("payjoin_senders"));
-        db_conn.save_new_payjoin_sender_session(&session_id);
-        Self { db, session_id }
+        let session_id = db_conn.save_new_payjoin_sender_session();
+        Self {
+            db,
+            session_id: SessionId(session_id),
+        }
     }
 
     pub fn from_id(db: Arc<dyn DatabaseInterface>, id: SessionId) -> Self {
