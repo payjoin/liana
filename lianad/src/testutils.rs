@@ -9,10 +9,7 @@ use crate::{
     DaemonControl, DaemonHandle,
 };
 use liana::descriptors;
-use payjoin::{
-    receive::v2::SessionEvent as ReceiverSessionEvent,
-    send::v2::SessionEvent as SenderSessionEvent, OhttpKeys,
-};
+use payjoin::OhttpKeys;
 
 use std::convert::TryInto;
 use std::{
@@ -154,6 +151,14 @@ impl BitcoinInterface for DummyBitcoind {
     }
 }
 
+struct PayjoinSession {
+    completed: bool,
+}
+
+struct PayjoinSessionEvent {
+    events: Vec<Vec<u8>>,
+}
+
 struct DummyDbState {
     deposit_index: bip32::ChildNumber,
     change_index: bip32::ChildNumber,
@@ -165,6 +170,9 @@ struct DummyDbState {
     timestamp: u32,
     rescan_timestamp: Option<u32>,
     last_poll_timestamp: Option<u32>,
+    payjoin_sender_sessions: HashMap<i64, PayjoinSession>,
+    payjoin_receiver_sessions: HashMap<i64, PayjoinSession>,
+    payjoin_session_events: HashMap<i64, PayjoinSessionEvent>,
 }
 
 pub struct DummyDatabase {
@@ -200,6 +208,9 @@ impl DummyDatabase {
                 timestamp: now,
                 rescan_timestamp: None,
                 last_poll_timestamp: None,
+                payjoin_sender_sessions: HashMap::new(),
+                payjoin_receiver_sessions: HashMap::new(),
+                payjoin_session_events: HashMap::new(),
             })),
         }
     }
@@ -559,22 +570,6 @@ impl DatabaseConnection for DummyDatabase {
     fn get_labels_bip329(&mut self, _offset: u32, _limit: u32) -> bip329::Labels {
         todo!()
     }
-
-    fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
-        todo!()
-    }
-    fn save_new_payjoin_sender_session(&mut self, _session_id: &SessionId) {
-        todo!()
-    }
-
-    fn payjoin_next_id(&mut self, _table: &str) -> u64 {
-        todo!()
-    }
-
-    fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {
-        todo!()
-    }
-
     fn payjoin_get_ohttp_keys(&mut self, _ohttp_relay: &str) -> Option<(u32, OhttpKeys)> {
         todo!()
     }
@@ -583,32 +578,117 @@ impl DatabaseConnection for DummyDatabase {
         todo!()
     }
 
-    fn save_new_payjoin_receiver_session(&mut self, session_id: &SessionId) {
-        todo!()
+    fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
+        self.db
+            .read()
+            .expect("lock should not be poisoned")
+            .payjoin_receiver_sessions
+            .keys()
+            .map(|id| SessionId(*id))
+            .collect()
+    }
+    fn save_new_payjoin_sender_session(&mut self) -> i64 {
+        let id = self
+            .db
+            .read()
+            .expect("lock should not be poisoned")
+            .payjoin_sender_sessions
+            .len() as i64
+            + 1;
+        self.db
+            .write()
+            .expect("lock should not be poisoned")
+            .payjoin_sender_sessions
+            .insert(id, PayjoinSession { completed: false });
+        id
+    }
+
+    fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {
+        self.db
+            .read()
+            .expect("lock should not be poisoned")
+            .payjoin_sender_sessions
+            .keys()
+            .map(|id| SessionId(*id))
+            .collect()
+    }
+
+    fn save_new_payjoin_receiver_session(&mut self) -> i64 {
+        let id = self
+            .db
+            .read()
+            .expect("lock should not be poisoned")
+            .payjoin_receiver_sessions
+            .len() as i64
+            + 1;
+        self.db
+            .write()
+            .expect("lock should not be poisoned")
+            .payjoin_receiver_sessions
+            .insert(id, PayjoinSession { completed: false });
+        id
     }
 
     fn save_receiver_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {
-        todo!()
+        self.db
+            .write()
+            .expect("lock should not be poisoned")
+            .payjoin_session_events
+            .entry(session_id.0)
+            .or_insert(PayjoinSessionEvent { events: Vec::new() })
+            .events
+            .push(event);
     }
 
     fn update_receiver_session_completed_at(&mut self, session_id: &SessionId) {
-        todo!()
+        self.db
+            .write()
+            .expect("lock should not be poisoned")
+            .payjoin_receiver_sessions
+            .entry(session_id.0)
+            .or_insert(PayjoinSession { completed: false })
+            .completed = true;
     }
 
     fn load_receiver_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>> {
-        todo!()
+        self.db
+            .read()
+            .expect("lock should not be poisoned")
+            .payjoin_session_events
+            .get(&session_id.0)
+            .map(|e| e.events.clone())
+            .unwrap_or_default()
     }
 
     fn save_sender_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {
-        todo!()
+        self.db
+            .write()
+            .expect("lock should not be poisoned")
+            .payjoin_session_events
+            .entry(session_id.0)
+            .or_insert(PayjoinSessionEvent { events: Vec::new() })
+            .events
+            .push(event);
     }
 
     fn get_all_sender_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>> {
-        todo!()
+        self.db
+            .read()
+            .expect("lock should not be poisoned")
+            .payjoin_session_events
+            .get(&session_id.0)
+            .map(|e| e.events.clone())
+            .unwrap_or_default()
     }
 
     fn update_sender_session_completed_at(&mut self, session_id: &SessionId) {
-        todo!()
+        self.db
+            .write()
+            .expect("lock should not be poisoned")
+            .payjoin_receiver_sessions
+            .entry(session_id.0)
+            .or_insert(PayjoinSession { completed: false })
+            .completed = true;
     }
 }
 
