@@ -1,5 +1,6 @@
 use bip329::Label;
 use liana::descriptors::LianaDescriptor;
+use payjoin::bitcoin::{consensus::Decodable, io::Cursor};
 
 use std::{convert::TryFrom, str::FromStr};
 
@@ -85,6 +86,16 @@ CREATE TABLE coins (
     FOREIGN KEY (spend_txid) REFERENCES transactions (txid)
         ON UPDATE RESTRICT
         ON DELETE RESTRICT
+);
+
+/* Seen Payjoin outpoints
+ *
+ * The 'added_at' field is simply the time that this outpoint is added to the table for 
+ * tracking.
+ */
+CREATE TABLE payjoin_outpoints (
+    outpoint BLOB NOT NULL PRIMARY KEY,
+    added_at INTEGER NOT NULL
 );
 
 /* A mapping from descriptor address to derivation index. Necessary until
@@ -498,5 +509,26 @@ impl TryFrom<&rusqlite::Row<'_>> for DbWalletTransaction {
             transaction,
             block_info,
         })
+    }
+}
+
+/// An outpoint we have seen before in payjoin transactions
+#[derive(Clone, Debug, PartialEq)]
+pub struct DbPayjoinOutpoint {
+    pub outpoint: bitcoin::OutPoint,
+    pub added_at: Option<u32>,
+}
+
+impl TryFrom<&rusqlite::Row<'_>> for DbPayjoinOutpoint {
+    type Error = rusqlite::Error;
+
+    fn try_from(row: &rusqlite::Row) -> Result<Self, Self::Error> {
+        let outpoint: Vec<u8> = row.get(0)?;
+        let outpoint = bitcoin::OutPoint::consensus_decode(&mut Cursor::new(outpoint))
+            .expect("Outpoint should be decodable");
+
+        let added_at = row.get(1)?;
+
+        Ok(DbPayjoinOutpoint { outpoint, added_at })
     }
 }
