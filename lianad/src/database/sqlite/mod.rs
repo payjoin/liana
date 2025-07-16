@@ -1016,45 +1016,31 @@ impl SqliteConn {
         .expect("Db must not fail");
     }
 
-    /// Create a payjoin receiver
-    pub fn payjoin_next_id(&mut self, table: &str) -> u64 {
-        let count = db_query(
-            &mut self.conn,
-            &format!("SELECT COUNT(*) FROM {}", table),
-            rusqlite::params![],
-            |row| {
-                let count: u64 = row.get(0)?;
-                Ok(count)
-            },
-        )
-        .expect("Db must not fail");
-        if let Some(count) = count.first() {
-            *count
-        } else {
-            0
-        }
-    }
-
     /// Create new Receiver Session
-    pub fn save_new_payjoin_receiver_session(&mut self, session_id: &SessionId) {
+    pub fn save_new_payjoin_receiver_session(&mut self) -> i64 {
+        // TODO: is there a more elegant way to get the last insert row id atomically?
+        let mut id = 0i64;
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_receivers (session_id, created_at) VALUES (?1, ?2)",
-                rusqlite::params![session_id.0, curr_timestamp()],
+                "INSERT INTO payjoin_receivers (created_at) VALUES (?1)",
+                rusqlite::params![curr_timestamp()],
             )?;
+
+            id = db_tx.last_insert_rowid();
             Ok(())
         })
         .expect("Db must not fail");
+        id
     }
 
     /// Get all active receiver session ids
     pub fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
         db_query(
             &mut self.conn,
-            "SELECT session_id FROM payjoin_receivers WHERE completed_at IS NULL",
+            "SELECT id FROM payjoin_receivers WHERE completed_at IS NULL",
             rusqlite::params![],
             |row| {
-                let id: u64 = row.get(0)?;
+                let id: i64 = row.get(0)?;
                 Ok(SessionId::new(id))
             },
         )
@@ -1077,7 +1063,7 @@ impl SqliteConn {
     pub fn update_receiver_session_completed_at(&mut self, session_id: &SessionId) {
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "UPDATE payjoin_receivers SET completed_at = ?1 WHERE session_id = ?2",
+                "UPDATE payjoin_receivers SET completed_at = ?1 WHERE id = ?2",
                 rusqlite::params![curr_timestamp(), session_id.0],
             )?;
             Ok(())
@@ -1099,24 +1085,27 @@ impl SqliteConn {
         .expect("Db must not fail")
     }
 
-    pub fn save_new_payjoin_sender_session(&mut self, session_id: &SessionId) {
+    pub fn save_new_payjoin_sender_session(&mut self) -> i64 {
+        let mut id = 0i64;
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_senders (session_id, created_at) VALUES (?1, ?2)",
-                rusqlite::params![session_id.0, curr_timestamp()],
+                "INSERT INTO payjoin_senders (created_at) VALUES (?1)",
+                rusqlite::params![curr_timestamp()],
             )?;
+            id = db_tx.last_insert_rowid();
             Ok(())
         })
         .expect("Db must not fail");
+        id
     }
 
     pub fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {
         db_query(
             &mut self.conn,
-            "SELECT session_id FROM payjoin_senders WHERE completed_at IS NULL",
+            "SELECT id FROM payjoin_senders WHERE completed_at IS NULL",
             rusqlite::params![],
             |row| {
-                let id: u64 = row.get(0)?;
+                let id: i64 = row.get(0)?;
                 Ok(SessionId::new(id))
             },
         )
@@ -1137,7 +1126,7 @@ impl SqliteConn {
     pub fn update_sender_session_completed_at(&mut self, session_id: &SessionId) {
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "UPDATE payjoin_senders SET completed_at = ?1 WHERE session_id = ?2",
+                "UPDATE payjoin_senders SET completed_at = ?1 WHERE id = ?2",
                 rusqlite::params![curr_timestamp(), session_id.0],
             )?;
             Ok(())

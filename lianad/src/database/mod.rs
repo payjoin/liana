@@ -203,11 +203,8 @@ pub trait DatabaseConnection {
     /// Save OHttpKeys
     fn payjoin_save_ohttp_keys(&mut self, ohttp_relay: &str, ohttp_keys: OhttpKeys);
 
-    /// Get the next Session Id
-    fn payjoin_next_id(&mut self, table: &str) -> u64;
-
     /// Save Receiver Session
-    fn save_new_payjoin_receiver_session(&mut self, session_id: &SessionId);
+    fn save_new_payjoin_receiver_session(&mut self) -> i64;
 
     /// Get all Receiver Sessions
     fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId>;
@@ -223,7 +220,7 @@ pub trait DatabaseConnection {
     fn load_receiver_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>>;
 
     /// Create a payjoin sender
-    fn save_new_payjoin_sender_session(&mut self, session_id: &SessionId);
+    fn save_new_payjoin_sender_session(&mut self) -> i64;
     /// Get a all active payjoin senders
     fn get_all_sender_session_ids(&mut self) -> Vec<SessionId>;
 
@@ -466,12 +463,8 @@ impl DatabaseConnection for SqliteConn {
         self.payjoin_save_ohttp_keys(ohttp_relay, ohttp_keys)
     }
 
-    fn payjoin_next_id(&mut self, table: &str) -> u64 {
-        self.payjoin_next_id(table)
-    }
-
-    fn save_new_payjoin_receiver_session(&mut self, session_id: &SessionId) {
-        self.save_new_payjoin_receiver_session(session_id)
+    fn save_new_payjoin_receiver_session(&mut self) -> i64 {
+        self.save_new_payjoin_receiver_session()
     }
 
     fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
@@ -490,8 +483,8 @@ impl DatabaseConnection for SqliteConn {
         self.load_receiver_session_events(session_id)
     }
 
-    fn save_new_payjoin_sender_session(&mut self, session_id: &SessionId) {
-        self.save_new_payjoin_sender_session(session_id)
+    fn save_new_payjoin_sender_session(&mut self) -> i64 {
+        self.save_new_payjoin_sender_session()
     }
 
     fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {

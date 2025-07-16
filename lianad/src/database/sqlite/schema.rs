@@ -134,7 +134,6 @@ CREATE TABLE payjoin_ohttp_keys (
 /* Payjoin senders */
 CREATE TABLE payjoin_senders (
     id INTEGER PRIMARY KEY NOT NULL,
-    session_id INTEGER UNIQUE NOT NULL,
     created_at INTEGER NOT NULL,
     completed_at INTEGER
 );
@@ -145,13 +144,12 @@ CREATE TABLE payjoin_sender_events (
     session_id INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     event BLOB NOT NULL,
-    FOREIGN KEY (session_id) REFERENCES payjoin_senders (session_id)
+    FOREIGN KEY (session_id) REFERENCES payjoin_senders (id)
 );
 
 /* Payjoin receivers */
 CREATE TABLE payjoin_receivers (
     id INTEGER PRIMARY KEY NOT NULL,
-    session_id INTEGER UNIQUE NOT NULL,
     created_at INTEGER NOT NULL,
     completed_at INTEGER
 );
@@ -162,7 +160,7 @@ CREATE TABLE payjoin_receiver_events (
     session_id INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     event BLOB NOT NULL,
-    FOREIGN KEY (session_id) REFERENCES payjoin_receivers (session_id)
+    FOREIGN KEY (session_id) REFERENCES payjoin_receivers (id)
 );
 ";
 
