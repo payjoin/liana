@@ -20,6 +20,7 @@ use payjoin::{
         },
         InputPair,
     },
+    ImplementationError,
 };
 
 use crate::{
@@ -91,7 +92,10 @@ fn check_inputs_not_owned(
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal
         .check_inputs_not_owned(&mut |script| {
-            let address = bitcoin::Address::from_script(script, db_conn.network()).unwrap();
+            let address =
+                bitcoin::Address::from_script(script, db_conn.network()).map_err(|e| {
+                    ImplementationError::from(Box::new(e) as Box<dyn Error + Send + Sync>)
+                })?;
             Ok(db_conn
                 .derivation_index_by_address(&address)
                 .map(|(index, is_change)| AddrInfo { index, is_change })
@@ -109,9 +113,10 @@ fn check_no_inputs_seen_before(
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal
-        // TODO implement check_no_inputs_seen_before callback and add new table to mark relevant
-        // outpoint as seen for the future
-        .check_no_inputs_seen_before(&mut |_| Ok(false))
+        .check_no_inputs_seen_before(&mut |outpoint| {
+            let seen = db_conn.insert_input_seen_before(&[*outpoint]);
+            Ok(seen)
+        })
         .save(persister)?;
     identify_receiver_outputs(proposal, persister, db_conn, desc, secp)
 }
@@ -123,9 +128,13 @@ fn identify_receiver_outputs(
     desc: &descriptors::LianaDescriptor,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
+    log::debug!("[Payjoin] receiver outputs");
     let proposal = proposal
         .identify_receiver_outputs(&mut |script| {
-            let address = bitcoin::Address::from_script(script, db_conn.network()).unwrap();
+            let address =
+                bitcoin::Address::from_script(script, db_conn.network()).map_err(|e| {
+                    ImplementationError::from(Box::new(e) as Box<dyn Error + Send + Sync>)
+                })?;
             Ok(db_conn
                 .derivation_index_by_address(&address)
                 .map(|(index, is_change)| AddrInfo { index, is_change })

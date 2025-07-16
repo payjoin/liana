@@ -239,6 +239,9 @@ pub trait DatabaseConnection {
     /// Load all receiver session events for a particular session id
     fn load_receiver_session_events(&mut self, session_id: &SessionId) -> Vec<Vec<u8>>;
 
+    /// Check if input has been seen before and then add it to the input_seen table
+    fn insert_input_seen_before(&mut self, outpoints: &[bitcoin::OutPoint]) -> bool;
+
     /// Create a payjoin sender
     fn save_new_payjoin_sender_session(&mut self, original_txid: &bitcoin::Txid) -> i64;
     /// Get a all active payjoin senders
@@ -482,6 +485,10 @@ impl DatabaseConnection for SqliteConn {
                 )
             })
             .collect()
+    }
+
+    fn insert_input_seen_before(&mut self, outpoints: &[bitcoin::OutPoint]) -> bool {
+        self.insert_outpoint_seen_before(outpoints)
     }
 
     fn payjoin_get_ohttp_keys(&mut self, ohttp_relay: &str) -> Option<(u32, OhttpKeys)> {

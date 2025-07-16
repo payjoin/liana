@@ -28,7 +28,7 @@ use crate::{
     payjoin::db::SessionId,
 };
 use liana::descriptors::LianaDescriptor;
-use payjoin::OhttpKeys;
+use payjoin::{bitcoin::consensus::Encodable, OhttpKeys};
 
 use std::{
     cmp,
@@ -479,6 +479,34 @@ impl SqliteConn {
             Ok(())
         })
         .expect("Database must be available")
+    }
+
+    pub fn insert_outpoint_seen_before<'a>(
+        &mut self,
+        outpoints: impl IntoIterator<Item = &'a bitcoin::OutPoint>,
+    ) -> bool {
+        let mut is_duplicate = false;
+        db_exec(&mut self.conn, |db_tx| {
+            for outpoint in outpoints {
+                let mut buf = Vec::new();
+                outpoint
+                    .consensus_encode(&mut buf)
+                    .expect("Outpoint must encode");
+                let affected = db_tx.execute(
+                    "INSERT OR IGNORE INTO payjoin_outpoints (outpoint, added_at) \
+                        VALUES (?1, ?2)",
+                    rusqlite::params![buf, curr_timestamp()],
+                )?;
+
+                if affected == 0 {
+                    is_duplicate = true
+                }
+            }
+            Ok(())
+        })
+        .expect("database must be available");
+
+        is_duplicate
     }
 
     /// Remove a set of coins from the database.
