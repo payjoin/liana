@@ -27,6 +27,7 @@ use liana::{
     },
 };
 
+use log::info;
 use utils::{
     deser_addr_assume_checked, deser_amount_from_sats, deser_fromstr, deser_hex, ser_amount,
     ser_hex, ser_to_string,
@@ -457,7 +458,6 @@ impl DaemonControl {
     }
 
     /// Get Payjoin URI (BIP21) and its sender/receiver status by txid
-    /// TODO: this seems unused, can we remove it?
     pub fn get_payjoin_info(
         &self,
         txid: &bitcoin::Txid,
@@ -470,35 +470,37 @@ impl DaemonControl {
             let (state, history) = replay_receiver_event_log(&persister).unwrap();
             let original_txid = history.fallback_tx().map(|tx| tx.compute_txid());
             if let Some(original_txid) = original_txid {
-                if original_txid == *txid {
-                    let bip21 = history
-                        .pj_uri()
-                        .expect("should exist at this point")
-                        .to_string();
-                    return Ok(Some(PayjoinInfo {
-                        bip21,
-                        status: state.into(),
-                    }));
-                }
+                // if original_txid == *txid {
+                let bip21 = history
+                    .pj_uri()
+                    .expect("should exist at this point")
+                    .to_string();
+                return Ok(Some(PayjoinInfo {
+                    bip21,
+                    status: state.into(),
+                }));
+                // }
             }
         }
 
         for session_id in db_conn.get_all_sender_session_ids() {
+            log::info!("Checking sender session: {:?}", session_id);
             let persister = SenderPersister::from_id(Arc::new(self.db.clone()), session_id.clone());
             let (state, history) = replay_sender_event_log(&persister).unwrap();
+            log::info!("Sender state: {:?}", state);
             let original_txid = history.fallback_tx().map(|tx| tx.compute_txid());
             if let Some(original_txid) = original_txid {
-                if original_txid == *txid {
-                    // TODO: this isnt a bip21, but a payjoin endpoint. Does this need to get returned?
-                    let bip21 = history
-                        .endpoint()
-                        .expect("should exist at this point")
-                        .to_string();
-                    return Ok(Some(PayjoinInfo {
-                        bip21,
-                        status: state.into(),
-                    }));
-                }
+                // if original_txid == *txid {
+                // TODO: this isnt a bip21, but a payjoin endpoint. Does this need to get returned?
+                let bip21 = history
+                    .endpoint()
+                    .expect("should exist at this point")
+                    .to_string();
+                return Ok(Some(PayjoinInfo {
+                    bip21,
+                    status: state.into(),
+                }));
+                // }
             }
         }
 
@@ -933,6 +935,7 @@ impl DaemonControl {
         // effort basis.
         let txid = tx.compute_txid();
         if let Some(mut db_psbt) = db_conn.spend_tx(&txid) {
+            info!("Updating spend: {:?}", txid);
             let db_tx = db_psbt.unsigned_tx.clone();
             for i in 0..db_tx.input.len() {
                 if tx
