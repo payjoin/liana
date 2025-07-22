@@ -417,28 +417,19 @@ pub fn spend_overview_view<'a>(
                                 .width(Length::Fixed(150.0)),
                         )
                     } else {
-                        Some(
-                            button::primary(None, "Broadcast")
-                                .on_press(Message::Spend(SpendTxMessage::Broadcast))
-                                .width(Length::Fixed(150.0)),
-                        )
-                    })
-                    .push_maybe(if tx.path_ready().is_some() {
                         if let Some(payjoin_info) = &tx.payjoin_info {
-                            if payjoin_info.status == PayjoinStatus::Pending {
-                                Some(
-                                    button::secondary(None, "Send Payjoin")
-                                        .on_press(Message::Spend(SpendTxMessage::SendPayjoin))
-                                        .width(Length::Fixed(150.0)),
-                                )
-                            } else {
-                                None
-                            }
+                            Some(
+                                button::alert(None, "Broadcast Payjoin Fallback Tx")
+                                    .on_press(Message::Spend(SpendTxMessage::SendPayjoin))
+                                    .width(Length::Fixed(250.0)),
+                            )
                         } else {
-                            None
+                            Some(
+                                button::primary(None, "Broadcast")
+                                    .on_press(Message::Spend(SpendTxMessage::Broadcast))
+                                    .width(Length::Fixed(150.0)),
+                            )
                         }
-                    } else {
-                        None
                     })
                     .align_y(Alignment::Center)
                     .spacing(20),
