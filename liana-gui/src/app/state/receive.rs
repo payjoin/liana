@@ -214,7 +214,7 @@ impl State for ReceivePanel {
                         daemon
                             .get_new_address()
                             .await
-                            .map(|res| (res.address, res.derivation_index, res.payjoin_uri))
+                            .map(|res| (res.address, res.derivation_index, res.bip21))
                             .map_err(|e| e.into())
                     },
                     Message::ReceiveAddress,
@@ -306,7 +306,7 @@ impl State for ReceivePanel {
                         daemon
                             .receive_payjoin()
                             .await
-                            .map(|res| (res.address, res.derivation_index, res.payjoin_uri))
+                            .map(|res| (res.address, res.derivation_index, res.bip21))
                             .map_err(|e| e.into())
                     },
                     Message::ReceiveAddress,
