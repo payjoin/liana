@@ -23,6 +23,7 @@ use liana_ui::{
     icon, theme,
     widget::*,
 };
+use payjoin::Url;
 
 use crate::{
     app::{
@@ -37,13 +38,12 @@ use super::message::Message;
 fn address_card<'a>(
     row_index: usize,
     address: &'a bitcoin::Address,
-    maybe_payjoin_uri: Option<&String>,
+    maybe_bip21: Option<&Url>,
     labels: &'a HashMap<String, String>,
     labels_editing: &'a HashMap<String, form::Value<String>>,
 ) -> Container<'a, Message> {
     let addr = address.to_string();
-    let payjoin_uri = maybe_payjoin_uri.unwrap_or(&String::new()).clone();
-    let has_payjoin_uri = !payjoin_uri.is_empty();
+    let has_bip21 = maybe_bip21.is_some();
     card::simple(
         Column::new()
             .push(if let Some(label) = labels_editing.get(&addr) {
@@ -77,7 +77,7 @@ fn address_card<'a>(
                     )
                     .align_y(Alignment::Center),
             )
-            .push_maybe(has_payjoin_uri.then_some({
+            .push_maybe(has_bip21.then_some({
                 Row::new()
                     .push(
                         Container::new(
@@ -85,9 +85,11 @@ fn address_card<'a>(
                                 Column::new()
                                     .push(Space::with_height(Length::Fixed(10.0)))
                                     .push(
-                                        p2_regular(&payjoin_uri)
-                                            .small()
-                                            .style(theme::text::secondary),
+                                        p2_regular(
+                                            &maybe_bip21.expect("checked above").to_string(),
+                                        )
+                                        .small()
+                                        .style(theme::text::secondary),
                                     )
                                     // Space between the URI and the scrollbar
                                     .push(Space::with_height(Length::Fixed(10.0))),
@@ -102,7 +104,9 @@ fn address_card<'a>(
                     )
                     .push(
                         Button::new(icon::clipboard_icon().style(theme::text::secondary))
-                            .on_press(Message::Clipboard(payjoin_uri.clone()))
+                            .on_press(Message::Clipboard(
+                                maybe_bip21.expect("checked above").to_string(),
+                            ))
                             .style(theme::button::transparent_border),
                     )
                     .align_y(Alignment::Center)
@@ -126,7 +130,7 @@ fn address_card<'a>(
 #[allow(clippy::too_many_arguments)]
 pub fn receive<'a>(
     addresses: &'a [bitcoin::Address],
-    payjoin_uris: &'a HashMap<String, String>,
+    bip21s: &'a HashMap<Address, Url>,
     labels: &'a HashMap<String, String>,
     prev_addresses: &'a [bitcoin::Address],
     prev_labels: &'a HashMap<String, String>,
@@ -167,13 +171,12 @@ pub fn receive<'a>(
                     // iterate starting from most recently generated
                     Column::new().spacing(10).width(Length::Fill),
                     |col, (i, address)| {
-                        let addr = address.to_string();
-                        let maybe_payjoin_uri = payjoin_uris.get(&addr);
+                        let maybe_bip21 = bip21s.get(address);
                         addresses_count += 1;
                         col.push(address_card(
                             i,
                             address,
-                            maybe_payjoin_uri,
+                            maybe_bip21,
                             labels,
                             labels_editing,
                         ))
@@ -210,7 +213,7 @@ pub fn receive<'a>(
                 Column::new().spacing(10).width(Length::Fill),
                 |col, (i, address)| {
                     let addr = address.to_string();
-                    let maybe_payjoin_uri = payjoin_uris.get(&addr);
+                    let maybe_bip21 = bip21s.get(address);
                     col.push(if !selected.contains(address) {
                         Button::new(
                             Row::new()
@@ -277,7 +280,7 @@ pub fn receive<'a>(
                         Button::new(address_card(
                             addresses_count + i,
                             address,
-                            maybe_payjoin_uri,
+                            maybe_bip21,
                             prev_labels,
                             labels_editing,
                         ))

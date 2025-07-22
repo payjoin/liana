@@ -37,6 +37,7 @@ use std::{
     collections::{hash_map, HashMap, HashSet},
     convert::{TryFrom, TryInto},
     fmt,
+    str::FromStr,
     sync::{self, mpsc, Arc},
     time::SystemTime,
 };
@@ -53,7 +54,7 @@ use payjoin::{
     bitcoin::{key::Secp256k1, FeeRate},
     receive::v2::{replay_event_log as replay_receiver_event_log, Receiver, UninitializedReceiver},
     send::v2::{replay_event_log as replay_sender_event_log, SenderBuilder},
-    Uri, UriExt,
+    Uri, UriExt, Url,
 };
 use serde::{Deserialize, Serialize};
 
@@ -378,7 +379,7 @@ impl DaemonControl {
             .receive_descriptor()
             .derive(new_index, &self.secp)
             .address(self.config.bitcoin_config.network);
-        GetAddressResult::new(address, new_index, "".to_string())
+        GetAddressResult::new(address, new_index, None)
     }
 
     pub fn receive_payjoin(&self) -> Result<GetAddressResult, CommandError> {
@@ -424,7 +425,7 @@ impl DaemonControl {
         Ok(GetAddressResult::new(
             address,
             new_index,
-            session.pj_uri().to_string(),
+            Some(Url::from_str(session.pj_uri().to_string().as_str()).expect("Should be valid")),
         ))
     }
 
@@ -1517,14 +1518,14 @@ pub struct GetAddressResult {
     #[serde(deserialize_with = "deser_addr_assume_checked")]
     pub address: bitcoin::Address,
     pub derivation_index: bip32::ChildNumber,
-    pub bip21: String,
+    pub bip21: Option<Url>,
 }
 
 impl GetAddressResult {
     pub fn new(
         address: bitcoin::Address,
         derivation_index: bip32::ChildNumber,
-        bip21: String,
+        bip21: Option<Url>,
     ) -> Self {
         Self {
             address,

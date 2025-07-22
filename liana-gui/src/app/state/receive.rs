@@ -7,6 +7,7 @@ use liana::miniscript::bitcoin::{
     Address, Network,
 };
 use liana_ui::{component::modal, widget::*};
+use payjoin::Url;
 
 use crate::daemon::model::LabelsLoader;
 use crate::dir::LianaDirectory;
@@ -39,7 +40,7 @@ pub enum Modal {
 #[derive(Debug, Default)]
 pub struct Addresses {
     list: Vec<Address>,
-    payjoin_uris: HashMap<String, String>,
+    bip21s: HashMap<Address, Url>,
     derivation_indexes: Vec<ChildNumber>,
     labels: HashMap<String, String>,
 }
@@ -122,7 +123,7 @@ impl State for ReceivePanel {
             self.warning.as_ref(),
             view::receive::receive(
                 &self.addresses.list,
-                &self.addresses.payjoin_uris,
+                &self.addresses.bip21s,
                 &self.addresses.labels,
                 &self.prev_addresses.list,
                 &self.prev_addresses.labels,
@@ -177,13 +178,13 @@ impl State for ReceivePanel {
             }
             Message::ReceiveAddress(res) => {
                 match res {
-                    Ok((address, derivation_index, payjoin_uri)) => {
+                    Ok((address, derivation_index, bip21)) => {
                         self.warning = None;
                         self.addresses.list.push(address.clone());
                         self.addresses.derivation_indexes.push(derivation_index);
-                        self.addresses
-                            .payjoin_uris
-                            .insert(address.to_string(), payjoin_uri);
+                        if let Some(bip21) = bip21 {
+                            self.addresses.bip21s.insert(address, bip21);
+                        }
                     }
                     Err(e) => self.warning = Some(e),
                 }
@@ -503,7 +504,7 @@ mod tests {
                 Ok(json!(GetAddressResult::new(
                     addr.clone(),
                     ChildNumber::from_normal_idx(0).unwrap(),
-                    "".to_string(),
+                    None,
                 ))),
             ),
         ]);
