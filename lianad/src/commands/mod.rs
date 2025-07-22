@@ -1517,20 +1517,19 @@ pub struct GetAddressResult {
     #[serde(deserialize_with = "deser_addr_assume_checked")]
     pub address: bitcoin::Address,
     pub derivation_index: bip32::ChildNumber,
-    pub payjoin_uri: String,
+    pub bip21: String,
 }
 
 impl GetAddressResult {
     pub fn new(
         address: bitcoin::Address,
         derivation_index: bip32::ChildNumber,
-        // TODO: rename to bip21
-        payjoin_uri: String,
+        bip21: String,
     ) -> Self {
         Self {
             address,
             derivation_index,
-            payjoin_uri,
+            bip21,
         }
     }
 }

@@ -620,7 +620,7 @@ impl Daemon for BackendWalletClient {
         Ok(GetAddressResult {
             address: res.address,
             derivation_index: res.derivation_index,
-            payjoin_uri: "bitcoin:".to_string(),
+            bip21: "bitcoin:".to_string(),
         })
     }
 
