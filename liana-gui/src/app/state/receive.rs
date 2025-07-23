@@ -34,6 +34,7 @@ const PREV_ADDRESSES_PAGE_SIZE: usize = 20;
 pub enum Modal {
     VerifyAddress(VerifyAddressModal),
     ShowQrCode(ShowQrCodeModal),
+    ShowBip21QrCode(ShowBip21QrCodeModal),
     None,
 }
 
@@ -140,6 +141,9 @@ impl State for ReceivePanel {
                 .on_blur(Some(view::Message::Close))
                 .into(),
             Modal::ShowQrCode(m) => modal::Modal::new(content, m.view())
+                .on_blur(Some(view::Message::Close))
+                .into(),
+            Modal::ShowBip21QrCode(m) => modal::Modal::new(content, m.view())
                 .on_blur(Some(view::Message::Close))
                 .into(),
             Modal::None => content,
@@ -300,6 +304,20 @@ impl State for ReceivePanel {
                 }
                 Task::none()
             }
+            Message::View(view::Message::ShowBip21QrCode(i)) => {
+                if let (Some(bip21), Some(index)) = (
+                    &self
+                        .addresses
+                        .bip21s
+                        .get(self.address(i).expect("Address should be in bip21")),
+                    self.derivation_index(i),
+                ) {
+                    if let Some(modal) = ShowBip21QrCodeModal::new(bip21, *index) {
+                        self.modal = Modal::ShowBip21QrCode(modal);
+                    }
+                }
+                Task::none()
+            }
             Message::View(view::Message::PayjoinInitiate) => {
                 let daemon = daemon.clone();
                 Task::perform(
@@ -450,6 +468,26 @@ impl ShowQrCodeModal {
 
     fn view(&self) -> Element<view::Message> {
         view::receive::qr_modal(&self.qr_code, &self.address)
+    }
+}
+
+pub struct ShowBip21QrCodeModal {
+    qr_code: qr_code::Data,
+    bip21: String,
+}
+
+impl ShowBip21QrCodeModal {
+    pub fn new(bip21: &payjoin::Url, _index: ChildNumber) -> Option<Self> {
+        qr_code::Data::new(format!("{}", bip21))
+            .ok()
+            .map(|qr_code| Self {
+                qr_code,
+                bip21: bip21.to_string(),
+            })
+    }
+
+    fn view(&self) -> Element<view::Message> {
+        view::receive::qr_modal(&self.qr_code, &self.bip21)
     }
 }
 

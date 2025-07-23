@@ -118,10 +118,13 @@ fn address_card<'a>(
                             .on_press(Message::Select(row_index)),
                     )
                     .push(Space::with_width(Length::Fill))
-                    .push(
+                    .push(if has_bip21 {
+                        button::secondary(None, "Show Bip21 QR Code")
+                            .on_press(Message::ShowBip21QrCode(row_index))
+                    } else {
                         button::secondary(None, "Show QR Code")
-                            .on_press(Message::ShowQrCode(row_index)),
-                    ),
+                            .on_press(Message::ShowQrCode(row_index))
+                    }),
             )
             .spacing(10),
     )
@@ -400,6 +403,7 @@ pub fn verify_address_modal<'a>(
 }
 
 pub fn qr_modal<'a>(qr: &'a qr_code::Data, address: &'a String) -> Element<'a, Message> {
+    let max_width = if address.len() > 64 { 600 } else { 400 };
     Column::new()
         .push(
             Row::new()
@@ -413,6 +417,6 @@ pub fn qr_modal<'a>(qr: &'a qr_code::Data, address: &'a String) -> Element<'a, M
         .push(Space::with_height(Length::Fixed(15.0)))
         .push(Container::new(text(address).size(15)).center_x(Length::Fill))
         .width(Length::Fill)
-        .max_width(400)
+        .max_width(max_width)
         .into()
 }

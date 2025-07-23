@@ -26,6 +26,7 @@ pub enum Message {
     SelectHardwareWallet(usize),
     CreateRbf(CreateRbfMessage),
     ShowQrCode(usize),
+    ShowBip21QrCode(usize),
     ImportExport(ImportExportMessage),
     HideRescanWarning,
     ExportPsbt,
