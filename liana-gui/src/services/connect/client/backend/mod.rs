@@ -17,7 +17,7 @@ use lianad::{
     bip329::Labels,
     commands::{CoinStatus, GetInfoDescriptors, LCSpendInfo, LabelItem, UpdateDerivIndexesResult},
     config::Config,
-    payjoin::types::{PayjoinInfo, PayjoinStatus},
+    payjoin::types::PayjoinStatus,
 };
 use reqwest::{Error, IntoUrl, Method, RequestBuilder, Response};
 use tokio::sync::RwLock;
