@@ -472,10 +472,6 @@ impl DaemonControl {
                 .psbt_ready_for_signing()
                 .map(|psbt| psbt.unsigned_tx.compute_txid());
             info!("Ready to sign txid {:?}", ready_to_sign_txid);
-            let bip21 = history
-                .pj_uri()
-                .expect("should exist at this point")
-                .to_string();
             if let Some(ready_to_sign_txid) = ready_to_sign_txid {
                 if ready_to_sign_txid == *txid {
                     return Ok(state.into());
@@ -494,13 +490,10 @@ impl DaemonControl {
             let (state, history) = replay_sender_event_log(&persister).unwrap();
             log::info!("Sender state: {:?}", state);
             let original_txid = history.fallback_tx().map(|tx| tx.compute_txid());
-            if let Some(original_txid) = original_txid {
+            if let Some(_original_txid) = original_txid {
+                // TODO: fix this
                 // if original_txid == *txid {
                 // TODO: this isnt a bip21, but a payjoin endpoint. Does this need to get returned?
-                let bip21 = history
-                    .endpoint()
-                    .expect("should exist at this point")
-                    .to_string();
                 return Ok(state.into());
                 // }
             }

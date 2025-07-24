@@ -18,7 +18,7 @@ use liana::miniscript::bitcoin::{
 };
 use lianad::bip329::Labels;
 use lianad::commands::UpdateDerivIndexesResult;
-use lianad::payjoin::types::{PayjoinStatus};
+use lianad::payjoin::types::PayjoinStatus;
 use lianad::{
     commands::{CoinStatus, LabelItem, TransactionInfo},
     config::Config,
