@@ -5,7 +5,7 @@ use std::iter::FromIterator;
 use async_trait::async_trait;
 use lianad::bip329::Labels;
 use lianad::commands::{GetLabelsBip329Result, UpdateDerivIndexesResult};
-use lianad::payjoin::types::{PayjoinInfo, PayjoinStatus};
+use lianad::payjoin::types::{PayjoinStatus};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;

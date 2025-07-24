@@ -1313,7 +1313,6 @@ fn spend_tx_from_api(
         network,
         // TODO: Payjoin status is getting set to None and so is bip21
         None,
-        "".to_string(), // BIP21
     );
     tx.load_labels(&labels);
     tx

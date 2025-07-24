@@ -91,6 +91,7 @@ pub struct PsbtState {
     pub wallet: Arc<Wallet>,
     pub desc_policy: LianaPolicy,
     pub tx: SpendTx,
+    pub bip21: Option<String>,
     pub saved: bool,
     pub warning: Option<Error>,
     pub labels_edited: LabelsEdited,
@@ -98,7 +99,7 @@ pub struct PsbtState {
 }
 
 impl PsbtState {
-    pub fn new(wallet: Arc<Wallet>, tx: SpendTx, saved: bool) -> Self {
+    pub fn new(wallet: Arc<Wallet>, tx: SpendTx, saved: bool, bip21: Option<String>) -> Self {
         Self {
             desc_policy: wallet.main_descriptor.policy(),
             wallet,
@@ -106,6 +107,7 @@ impl PsbtState {
             warning: None,
             modal: None,
             tx,
+            bip21,
             saved,
         }
     }
@@ -196,7 +198,8 @@ impl PsbtState {
                 self.modal = None;
                 if let Some(_payjoin_info) = self.tx.payjoin_status.clone() {
                     let psbt = self.tx.psbt.clone();
-                    let bip21 = self.tx.bip21.clone();
+                    // TODO: should this be an error?
+                    let bip21 = self.bip21.clone().expect("bip21 should be set");
                     return Task::perform(
                         async move {
                             daemon

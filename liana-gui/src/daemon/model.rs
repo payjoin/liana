@@ -55,8 +55,8 @@ pub struct SpendTx {
     pub updated_at: Option<u32>,
     pub kind: TransactionKind,
     pub payjoin_status: Option<PayjoinStatus>,
-    // TODO: use a stronger type like bitcoin_uri
-    pub bip21: String,
+    // // TODO: use a stronger type like bitcoin_uri
+    // pub bip21: String,
 }
 
 #[derive(PartialOrd, Ord, Debug, Clone, PartialEq, Eq)]
@@ -78,7 +78,6 @@ impl SpendTx {
         secp: &secp256k1::Secp256k1<impl secp256k1::Verification>,
         network: Network,
         payjoin_status: Option<PayjoinStatus>,
-        bip21: String,
     ) -> Self {
         // Use primary path if no inputs are using a relative locktime.
         let use_primary_path = !psbt
@@ -199,7 +198,6 @@ impl SpendTx {
             sigs,
             network,
             payjoin_status,
-            bip21,
         }
     }
 
