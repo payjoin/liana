@@ -207,7 +207,7 @@ pub trait DatabaseConnection {
     fn save_new_payjoin_receiver_session(&mut self) -> i64;
 
     /// Get all Receiver Sessions
-    fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId>;
+    fn get_all_active_receiver_session_ids(&mut self) -> Vec<SessionId>;
 
     /// Save a Receiver Session Event
     fn save_receiver_session_event(&mut self, session_id: &SessionId, event: Vec<u8>);
@@ -222,7 +222,7 @@ pub trait DatabaseConnection {
     /// Create a payjoin sender
     fn save_new_payjoin_sender_session(&mut self) -> i64;
     /// Get a all active payjoin senders
-    fn get_all_sender_session_ids(&mut self) -> Vec<SessionId>;
+    fn get_all_active_sender_session_ids(&mut self) -> Vec<SessionId>;
 
     /// Save a sender session event
     fn save_sender_session_event(&mut self, session_id: &SessionId, event: Vec<u8>);
@@ -467,8 +467,8 @@ impl DatabaseConnection for SqliteConn {
         self.save_new_payjoin_receiver_session()
     }
 
-    fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
-        self.get_all_receiver_session_ids()
+    fn get_all_active_receiver_session_ids(&mut self) -> Vec<SessionId> {
+        self.get_all_active_receiver_session_ids()
     }
 
     fn save_receiver_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {
@@ -487,8 +487,8 @@ impl DatabaseConnection for SqliteConn {
         self.save_new_payjoin_sender_session()
     }
 
-    fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {
-        self.get_all_sender_session_ids()
+    fn get_all_active_sender_session_ids(&mut self) -> Vec<SessionId> {
+        self.get_all_active_sender_session_ids()
     }
 
     fn save_sender_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {

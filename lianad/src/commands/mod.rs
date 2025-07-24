@@ -465,7 +465,7 @@ impl DaemonControl {
     ) -> Result<Option<PayjoinInfo>, CommandError> {
         let mut db_conn = self.db.connection();
         info!("Getting payjoin info for txid: {:?}", txid);
-        for session_id in db_conn.get_all_receiver_session_ids() {
+        for session_id in db_conn.get_all_active_receiver_session_ids() {
             let persister =
                 ReceiverPersister::from_id(Arc::new(self.db.clone()), session_id.clone());
             let (state, history) = replay_receiver_event_log(&persister).unwrap();
@@ -497,7 +497,7 @@ impl DaemonControl {
             }
         }
 
-        for session_id in db_conn.get_all_sender_session_ids() {
+        for session_id in db_conn.get_all_active_sender_session_ids() {
             log::info!("Checking sender session: {:?}", session_id);
             let persister = SenderPersister::from_id(Arc::new(self.db.clone()), session_id.clone());
             let (state, history) = replay_sender_event_log(&persister).unwrap();

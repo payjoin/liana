@@ -1034,7 +1034,7 @@ impl SqliteConn {
     }
 
     /// Get all active receiver session ids
-    pub fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
+    pub fn get_all_active_receiver_session_ids(&mut self) -> Vec<SessionId> {
         db_query(
             &mut self.conn,
             "SELECT id FROM payjoin_receivers WHERE completed_at IS NULL",
@@ -1099,7 +1099,8 @@ impl SqliteConn {
         id
     }
 
-    pub fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {
+    /// Get all active sender session ids
+    pub fn get_all_active_sender_session_ids(&mut self) -> Vec<SessionId> {
         db_query(
             &mut self.conn,
             "SELECT id FROM payjoin_senders WHERE completed_at IS NULL",
@@ -3764,7 +3765,7 @@ CREATE TABLE labels (
         let session_id_2 = conn.save_new_payjoin_receiver_session();
         assert!(session_id_2 > session_id_1);
 
-        let active_sessions = conn.get_all_receiver_session_ids();
+        let active_sessions = conn.get_all_active_receiver_session_ids();
         assert_eq!(active_sessions.len(), 2);
         assert!(active_sessions.iter().any(|s| s.0 == session_id_1));
         assert!(active_sessions.iter().any(|s| s.0 == session_id_2));
@@ -3784,7 +3785,7 @@ CREATE TABLE labels (
         assert_eq!(events[0], event_data);
 
         // Verify session is no longer active
-        let active_sessions_after = conn.get_all_receiver_session_ids();
+        let active_sessions_after = conn.get_all_active_receiver_session_ids();
         assert_eq!(active_sessions_after.len(), 1);
         assert!(!active_sessions_after.iter().any(|s| s.0 == session_id_1));
 
@@ -3813,7 +3814,7 @@ CREATE TABLE labels (
 
         // Test completing multiple sessions
         conn.update_receiver_session_completed_at(&session_3);
-        let final_active_sessions = conn.get_all_receiver_session_ids();
+        let final_active_sessions = conn.get_all_active_receiver_session_ids();
         assert_eq!(final_active_sessions.len(), 1);
         assert!(final_active_sessions.iter().any(|s| s.0 == session_id_2));
 
@@ -3830,7 +3831,7 @@ CREATE TABLE labels (
         let session_id_2 = conn.save_new_payjoin_sender_session();
         assert!(session_id_2 > session_id_1);
 
-        let active_sessions = conn.get_all_sender_session_ids();
+        let active_sessions = conn.get_all_active_sender_session_ids();
         assert_eq!(active_sessions.len(), 2);
         assert!(active_sessions.iter().any(|s| s.0 == session_id_1));
         assert!(active_sessions.iter().any(|s| s.0 == session_id_2));
@@ -3851,7 +3852,7 @@ CREATE TABLE labels (
         assert_eq!(events[0], event_data);
 
         // Verify session is no longer active
-        let active_sessions_after = conn.get_all_sender_session_ids();
+        let active_sessions_after = conn.get_all_active_sender_session_ids();
         assert_eq!(active_sessions_after.len(), 1);
         assert!(!active_sessions_after.iter().any(|s| s.0 == session_id_1));
 
@@ -3880,7 +3881,7 @@ CREATE TABLE labels (
 
         // Test completing multiple sessions
         conn.update_sender_session_completed_at(&session_3);
-        let final_active_sessions = conn.get_all_sender_session_ids();
+        let final_active_sessions = conn.get_all_active_sender_session_ids();
         assert_eq!(final_active_sessions.len(), 1);
         assert!(final_active_sessions.iter().any(|s| s.0 == session_id_2));
 

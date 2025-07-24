@@ -310,7 +310,7 @@ fn process_receiver_session(
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let mut db_conn = db.connection();
-    for session_id in db_conn.get_all_receiver_session_ids() {
+    for session_id in db_conn.get_all_active_receiver_session_ids() {
         let persister = ReceiverPersister::from_id(Arc::new(db.clone()), session_id.clone());
 
         let (state, _) = replay_event_log(&persister)
