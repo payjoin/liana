@@ -7,6 +7,7 @@ pub enum PayjoinStatus {
     WaitingToSign,
     Success,
     Failed,
+    Unknown,
 }
 
 impl From<ReceiveSession> for PayjoinStatus {
