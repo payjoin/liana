@@ -77,7 +77,7 @@ fn address_card<'a>(
                     )
                     .align_y(Alignment::Center),
             )
-            .push_maybe(has_bip21.then_some({
+            .push_maybe(maybe_bip21.map(|bip21| {
                 Row::new()
                     .push(
                         Container::new(
@@ -85,11 +85,9 @@ fn address_card<'a>(
                                 Column::new()
                                     .push(Space::with_height(Length::Fixed(10.0)))
                                     .push(
-                                        p2_regular(
-                                            &maybe_bip21.expect("checked above").to_string(),
-                                        )
-                                        .small()
-                                        .style(theme::text::secondary),
+                                        p2_regular(&bip21.to_string())
+                                            .small()
+                                            .style(theme::text::secondary),
                                     )
                                     // Space between the URI and the scrollbar
                                     .push(Space::with_height(Length::Fixed(10.0))),
@@ -104,9 +102,7 @@ fn address_card<'a>(
                     )
                     .push(
                         Button::new(icon::clipboard_icon().style(theme::text::secondary))
-                            .on_press(Message::Clipboard(
-                                maybe_bip21.expect("checked above").to_string(),
-                            ))
+                            .on_press(Message::Clipboard(bip21.to_string()))
                             .style(theme::button::transparent_border),
                     )
                     .align_y(Alignment::Center)

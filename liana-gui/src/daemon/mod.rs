@@ -18,7 +18,7 @@ use liana::miniscript::bitcoin::{
 };
 use lianad::bip329::Labels;
 use lianad::commands::UpdateDerivIndexesResult;
-use lianad::payjoin::types::PayjoinInfo;
+use lianad::payjoin::types::{PayjoinInfo, PayjoinStatus};
 use lianad::{
     commands::{CoinStatus, LabelItem, TransactionInfo},
     config::Config,
@@ -117,7 +117,7 @@ pub trait Daemon: Debug {
     ) -> Result<model::ListRevealedAddressesResult, DaemonError>;
     async fn receive_payjoin(&self) -> Result<model::GetAddressResult, DaemonError>;
     async fn send_payjoin(&self, bip21: String, psbt: &Psbt) -> Result<(), DaemonError>;
-    async fn get_payjoin_info(&self, txid: &Txid) -> Result<Option<PayjoinInfo>, DaemonError>;
+    async fn get_payjoin_info(&self, txid: &Txid) -> Result<PayjoinStatus, DaemonError>;
     async fn update_deriv_indexes(
         &self,
         receive: Option<u32>,
@@ -212,10 +212,9 @@ pub trait Daemon: Debug {
                 .cloned()
                 .collect();
 
-            let payjoin_info = self
+            let payjoin_status = self
                 .get_payjoin_info(&tx.psbt.unsigned_tx.compute_txid())
                 .await?;
-            log::info!("payjoin_info: {:?}", payjoin_info);
 
             spend_txs.push(model::SpendTx::new(
                 tx.updated_at,
@@ -224,10 +223,9 @@ pub trait Daemon: Debug {
                 &info.descriptors.main,
                 &curve,
                 info.network,
-                payjoin_info.as_ref().map(|info| info.status),
-                payjoin_info
-                    .map(|info| info.bip21)
-                    .unwrap_or("".to_string()),
+                Some(payjoin_status),
+                // TODO: should spend tx even have a bip21 field here. This feels like a UI concern
+                "TODO: dont have bip21 in this context".to_string(),
             ));
         }
         load_labels(self, &mut spend_txs).await?;

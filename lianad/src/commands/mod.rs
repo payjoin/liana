@@ -11,7 +11,7 @@ use crate::{
     payjoin::{
         db::{ReceiverPersister, SenderPersister},
         helpers::{fetch_ohttp_keys, FetchOhttpKeysError},
-        types::PayjoinInfo,
+        types::{PayjoinInfo, PayjoinStatus},
     },
     poller::PollerMessage,
     DaemonControl, VERSION,
@@ -459,10 +459,7 @@ impl DaemonControl {
     }
 
     /// Get Payjoin URI (BIP21) and its sender/receiver status by txid
-    pub fn get_payjoin_info(
-        &self,
-        txid: &bitcoin::Txid,
-    ) -> Result<Option<PayjoinInfo>, CommandError> {
+    pub fn get_payjoin_info(&self, txid: &bitcoin::Txid) -> Result<PayjoinStatus, CommandError> {
         let mut db_conn = self.db.connection();
         info!("Getting payjoin info for txid: {:?}", txid);
         for session_id in db_conn.get_all_active_receiver_session_ids() {
@@ -481,18 +478,12 @@ impl DaemonControl {
                 .to_string();
             if let Some(ready_to_sign_txid) = ready_to_sign_txid {
                 if ready_to_sign_txid == *txid {
-                    return Ok(Some(PayjoinInfo {
-                        bip21,
-                        status: state.into(),
-                    }));
+                    return Ok(state.into());
                 }
             }
             if let Some(original_txid) = original_txid {
                 if original_txid == *txid {
-                    return Ok(Some(PayjoinInfo {
-                        bip21,
-                        status: state.into(),
-                    }));
+                    return Ok(state.into());
                 }
             }
         }
@@ -510,15 +501,12 @@ impl DaemonControl {
                     .endpoint()
                     .expect("should exist at this point")
                     .to_string();
-                return Ok(Some(PayjoinInfo {
-                    bip21,
-                    status: state.into(),
-                }));
+                return Ok(state.into());
                 // }
             }
         }
 
-        Ok(None)
+        Ok(PayjoinStatus::Unknown)
     }
 
     /// Update derivation indexes
