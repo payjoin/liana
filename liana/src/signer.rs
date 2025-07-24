@@ -378,16 +378,14 @@ impl HotSigner {
         // Sign each input in the PSBT.
         for i in 0..psbt.inputs.len() {
             if psbt.inputs[i].witness_script.is_some() {
-                match self.sign_p2wsh(
+                self.sign_p2wsh(
                     secp,
                     &mut sighash_cache,
                     master_fingerprint,
                     &mut psbt.inputs[i],
                     i,
-                ) {
-                    Ok(_) => log::info!("Signed input at {}", i),
-                    Err(err) => log::warn!("Didnt sign input at {} | {}", i, err),
-                }
+                )?;
+                log::info!("Signed input at {}", i);
             } else {
                 self.sign_taproot(
                     secp,
