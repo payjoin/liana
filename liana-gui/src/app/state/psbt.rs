@@ -194,12 +194,13 @@ impl PsbtState {
             Message::View(view::Message::Spend(view::SpendTxMessage::PayjoinInitiated)) => {
                 self.tx.status = SpendStatus::PayjoinInitiated;
                 self.modal = None;
-                if let Some(payjoin_info) = self.tx.payjoin_info.clone() {
+                if let Some(_payjoin_info) = self.tx.payjoin_status.clone() {
                     let psbt = self.tx.psbt.clone();
+                    let bip21 = self.tx.bip21.clone();
                     return Task::perform(
                         async move {
                             daemon
-                                .send_payjoin(payjoin_info.bip21, &psbt)
+                                .send_payjoin(bip21, &psbt)
                                 .await
                                 .map_err(|e| e.into())
                         },

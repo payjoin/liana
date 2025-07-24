@@ -15,7 +15,7 @@ pub use lianad::commands::{
     ListCoinsResult, ListRevealedAddressesEntry, ListRevealedAddressesResult, ListSpendEntry,
     ListSpendResult, ListTransactionsResult, TransactionInfo,
 };
-use lianad::payjoin::types::PayjoinInfo;
+use lianad::payjoin::types::PayjoinStatus;
 
 pub type Coin = ListCoinsEntry;
 
@@ -54,7 +54,9 @@ pub struct SpendTx {
     pub sigs: PartialSpendInfo,
     pub updated_at: Option<u32>,
     pub kind: TransactionKind,
-    pub payjoin_info: Option<PayjoinInfo>,
+    pub payjoin_status: Option<PayjoinStatus>,
+    // TODO: use a stronger type like bitcoin_uri
+    pub bip21: String,
 }
 
 #[derive(PartialOrd, Ord, Debug, Clone, PartialEq, Eq)]
@@ -75,7 +77,8 @@ impl SpendTx {
         desc: &LianaDescriptor,
         secp: &secp256k1::Secp256k1<impl secp256k1::Verification>,
         network: Network,
-        payjoin_info: Option<PayjoinInfo>,
+        payjoin_status: Option<PayjoinStatus>,
+        bip21: String,
     ) -> Self {
         // Use primary path if no inputs are using a relative locktime.
         let use_primary_path = !psbt
@@ -150,7 +153,7 @@ impl SpendTx {
         };
 
         // One input coin is missing, the psbt is deprecated for now.
-        if coins_map.len() != psbt.inputs.len() && payjoin_info.is_none() {
+        if coins_map.len() != psbt.inputs.len() && payjoin_status.is_none() {
             status = SpendStatus::Deprecated
         }
 
@@ -195,7 +198,8 @@ impl SpendTx {
             status,
             sigs,
             network,
-            payjoin_info,
+            payjoin_status,
+            bip21,
         }
     }
 

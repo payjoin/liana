@@ -223,7 +223,10 @@ pub trait Daemon: Debug {
                 &info.descriptors.main,
                 &curve,
                 info.network,
-                payjoin_info,
+                payjoin_info.as_ref().map(|info| info.status),
+                payjoin_info
+                    .map(|info| info.bip21)
+                    .unwrap_or("".to_string()),
             ));
         }
         load_labels(self, &mut spend_txs).await?;

@@ -18,10 +18,7 @@ use liana::{
     },
     spend::{SpendCreationError, MAX_FEERATE},
 };
-use lianad::{
-    commands::ListCoinsEntry,
-    payjoin::types::{PayjoinInfo, PayjoinStatus},
-};
+use lianad::{commands::ListCoinsEntry, payjoin::types::PayjoinStatus};
 
 use liana_ui::{component::form, widget::Element};
 use payjoin::Uri;
@@ -991,15 +988,22 @@ impl Step for SaveSpend {
     fn load(&mut self, _coins: &[Coin], _tip_height: i32, draft: &TransactionDraft) {
         let (psbt, warnings) = draft.generated.clone().unwrap();
 
-        let bip21 = draft.recipients.first().unwrap().bip21.value.clone();
-        let payjoin_info = if bip21.is_empty() {
-            None
+        let bip21 = draft
+            .recipients
+            .first()
+            .expect("one recipient")
+            .bip21
+            .value
+            .clone();
+
+        let payjoin_status = if let Ok(uri) = Uri::try_from(bip21.as_str()) {
+            if uri.assume_checked().extras.pj_is_supported() {
+                Some(PayjoinStatus::Pending)
+            } else {
+                None
+            }
         } else {
-            // TODO: this seems wrong. The presence of a bip21 doesnt mean its a payjoin
-            Some(PayjoinInfo {
-                bip21,
-                status: PayjoinStatus::Pending,
-            })
+            None
         };
 
         let mut tx = SpendTx::new(
@@ -1009,7 +1013,8 @@ impl Step for SaveSpend {
             &self.wallet.main_descriptor,
             &self.curve,
             draft.network,
-            payjoin_info,
+            payjoin_status,
+            bip21,
         );
         tx.labels.clone_from(&draft.labels);
 
