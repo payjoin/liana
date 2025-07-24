@@ -1,5 +1,4 @@
 use lianad::commands::UpdateDerivIndexesResult;
-use lianad::payjoin::types::PayjoinInfo;
 use lianad::{bip329::Labels, payjoin::types::PayjoinStatus};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::Mutex;

@@ -43,7 +43,6 @@ fn address_card<'a>(
     labels_editing: &'a HashMap<String, form::Value<String>>,
 ) -> Container<'a, Message> {
     let addr = address.to_string();
-    let has_bip21 = maybe_bip21.is_some();
     card::simple(
         Column::new()
             .push(if let Some(label) = labels_editing.get(&addr) {

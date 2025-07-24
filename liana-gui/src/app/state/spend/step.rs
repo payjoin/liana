@@ -1014,7 +1014,6 @@ impl Step for SaveSpend {
             &self.curve,
             draft.network,
             payjoin_status,
-            bip21,
         );
         tx.labels.clone_from(&draft.labels);
 
@@ -1034,7 +1033,12 @@ impl Step for SaveSpend {
         }
 
         self.spend = Some((
-            psbt::PsbtState::new(self.wallet.clone(), tx, false),
+            psbt::PsbtState::new(
+                self.wallet.clone(),
+                tx,
+                false,
+                if bip21.is_empty() { None } else { Some(bip21) },
+            ),
             warnings,
         ));
     }

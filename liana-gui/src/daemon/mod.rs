@@ -18,7 +18,7 @@ use liana::miniscript::bitcoin::{
 };
 use lianad::bip329::Labels;
 use lianad::commands::UpdateDerivIndexesResult;
-use lianad::payjoin::types::{PayjoinInfo, PayjoinStatus};
+use lianad::payjoin::types::{PayjoinStatus};
 use lianad::{
     commands::{CoinStatus, LabelItem, TransactionInfo},
     config::Config,
@@ -224,8 +224,6 @@ pub trait Daemon: Debug {
                 &curve,
                 info.network,
                 Some(payjoin_status),
-                // TODO: should spend tx even have a bip21 field here. This feels like a UI concern
-                "TODO: dont have bip21 in this context".to_string(),
             ));
         }
         load_labels(self, &mut spend_txs).await?;
