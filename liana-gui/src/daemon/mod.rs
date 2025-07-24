@@ -215,6 +215,7 @@ pub trait Daemon: Debug {
             let payjoin_info = self
                 .get_payjoin_info(&tx.psbt.unsigned_tx.compute_txid())
                 .await?;
+            log::info!("payjoin_info: {:?}", payjoin_info);
 
             spend_txs.push(model::SpendTx::new(
                 tx.updated_at,

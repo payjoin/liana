@@ -464,23 +464,36 @@ impl DaemonControl {
         txid: &bitcoin::Txid,
     ) -> Result<Option<PayjoinInfo>, CommandError> {
         let mut db_conn = self.db.connection();
-
+        info!("Getting payjoin info for txid: {:?}", txid);
         for session_id in db_conn.get_all_receiver_session_ids() {
             let persister =
                 ReceiverPersister::from_id(Arc::new(self.db.clone()), session_id.clone());
             let (state, history) = replay_receiver_event_log(&persister).unwrap();
             let original_txid = history.fallback_tx().map(|tx| tx.compute_txid());
+            info!("Original txid {:?}", original_txid);
+            let ready_to_sign_txid = history
+                .psbt_ready_for_signing()
+                .map(|psbt| psbt.unsigned_tx.compute_txid());
+            info!("Ready to sign txid {:?}", ready_to_sign_txid);
+            let bip21 = history
+                .pj_uri()
+                .expect("should exist at this point")
+                .to_string();
+            if let Some(ready_to_sign_txid) = ready_to_sign_txid {
+                if ready_to_sign_txid == *txid {
+                    return Ok(Some(PayjoinInfo {
+                        bip21,
+                        status: state.into(),
+                    }));
+                }
+            }
             if let Some(original_txid) = original_txid {
-                // if original_txid == *txid {
-                let bip21 = history
-                    .pj_uri()
-                    .expect("should exist at this point")
-                    .to_string();
-                return Ok(Some(PayjoinInfo {
-                    bip21,
-                    status: state.into(),
-                }));
-                // }
+                if original_txid == *txid {
+                    return Ok(Some(PayjoinInfo {
+                        bip21,
+                        status: state.into(),
+                    }));
+                }
             }
         }
 
