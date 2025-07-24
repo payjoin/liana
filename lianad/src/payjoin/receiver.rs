@@ -90,7 +90,7 @@ fn check_inputs_not_owned(
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal
-        .check_inputs_not_owned(|script| {
+        .check_inputs_not_owned(&mut |script| {
             let address = bitcoin::Address::from_script(script, db_conn.network()).unwrap();
             Ok(db_conn
                 .derivation_index_by_address(&address)
@@ -111,7 +111,7 @@ fn check_no_inputs_seen_before(
     let proposal = proposal
         // TODO implement check_no_inputs_seen_before callback and add new table to mark relevant
         // outpoint as seen for the future
-        .check_no_inputs_seen_before(|_| Ok(false))
+        .check_no_inputs_seen_before(&mut |_| Ok(false))
         .save(persister)?;
     identify_receiver_outputs(proposal, persister, db_conn, desc, secp)
 }
@@ -124,7 +124,7 @@ fn identify_receiver_outputs(
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
     let proposal = proposal
-        .identify_receiver_outputs(|script| {
+        .identify_receiver_outputs(&mut |script| {
             let address = bitcoin::Address::from_script(script, db_conn.network()).unwrap();
             Ok(db_conn
                 .derivation_index_by_address(&address)
