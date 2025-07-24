@@ -578,7 +578,7 @@ impl DatabaseConnection for DummyDatabase {
         todo!()
     }
 
-    fn get_all_receiver_session_ids(&mut self) -> Vec<SessionId> {
+    fn get_all_active_receiver_session_ids(&mut self) -> Vec<SessionId> {
         self.db
             .read()
             .expect("lock should not be poisoned")
@@ -603,7 +603,7 @@ impl DatabaseConnection for DummyDatabase {
         id
     }
 
-    fn get_all_sender_session_ids(&mut self) -> Vec<SessionId> {
+    fn get_all_active_sender_session_ids(&mut self) -> Vec<SessionId> {
         self.db
             .read()
             .expect("lock should not be poisoned")

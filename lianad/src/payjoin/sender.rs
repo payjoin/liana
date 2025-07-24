@@ -91,7 +91,7 @@ fn process_sender_session(
 
 pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) {
     let mut db_conn = db.connection();
-    for session_id in db_conn.get_all_sender_session_ids() {
+    for session_id in db_conn.get_all_active_sender_session_ids() {
         let persister = SenderPersister::from_id(Arc::new(db.clone()), session_id.clone());
 
         let (state, session_history) = replay_event_log(&persister)
