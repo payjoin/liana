@@ -592,7 +592,7 @@ version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33415e24172c1b7d6066f6d999545375ab8e1d95421d6784bdfff9496f292387"
 dependencies = [
- "bitcoin_hashes 0.13.0",
+ "bitcoin_hashes 0.12.0",
  "serde",
  "unicode-normalization",
 ]
@@ -4285,7 +4285,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 [[package]]
 name = "payjoin"
 version = "0.24.0"
-source = "git+https://github.com/payjoin/rust-payjoin.git?branch=master#88b918f37a1af03ca3d48920ac8cd5ddcbe9dd44"
+source = "git+https://github.com/payjoin/rust-payjoin.git?branch=master#5ecfed745bd33f6d5706f497bdb7662a3a7c9177"
 dependencies = [
  "bhttp",
  "bitcoin",
@@ -5323,7 +5323,7 @@ version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
- "bitcoin_hashes 0.13.0",
+ "bitcoin_hashes 0.12.0",
  "rand 0.8.5",
  "secp256k1-sys",
  "serde",
