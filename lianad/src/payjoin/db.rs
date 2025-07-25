@@ -1,3 +1,4 @@
+use payjoin::bitcoin;
 use payjoin::persist::SessionPersister;
 use payjoin::receive::v2::SessionEvent as ReceiverSessionEvent;
 use payjoin::send::v2::SessionEvent as SenderSessionEvent;
@@ -98,9 +99,9 @@ pub struct SenderPersister {
 }
 
 impl SenderPersister {
-    pub fn new(db: Arc<dyn DatabaseInterface>) -> Self {
+    pub fn new(db: Arc<dyn DatabaseInterface>, original_txid: &bitcoin::Txid) -> Self {
         let mut db_conn = db.connection();
-        let session_id = db_conn.save_new_payjoin_sender_session();
+        let session_id = db_conn.save_new_payjoin_sender_session(original_txid);
         Self {
             db,
             session_id: SessionId(session_id),

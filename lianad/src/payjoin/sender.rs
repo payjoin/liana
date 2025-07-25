@@ -137,7 +137,6 @@ pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) 
                     }
                 }
 
-                // TODO: need a check here to see if this proposal already exists in the db
                 let new_txid = proposal_psbt.unsigned_tx.compute_txid();
                 if db_conn.spend_tx(&new_txid).is_some() {
                     log::info!("[Payjoin] Proposal already exists in the db");
@@ -149,6 +148,7 @@ pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) 
                     new_txid
                 );
                 db_conn.store_spend(&proposal_psbt);
+                db_conn.save_proposed_payjoin_txid(&session_id, &new_txid);
             }
             Ok(None) => {
                 log::info!("[Payjoin] Proposal not received yet...");

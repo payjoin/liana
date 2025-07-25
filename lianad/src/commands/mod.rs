@@ -11,7 +11,7 @@ use crate::{
     payjoin::{
         db::{ReceiverPersister, SenderPersister},
         helpers::{fetch_ohttp_keys, FetchOhttpKeysError},
-        types::{PayjoinInfo, PayjoinStatus},
+        types::PayjoinStatus,
     },
     poller::PollerMessage,
     DaemonControl, VERSION,
@@ -447,8 +447,9 @@ impl DaemonControl {
         psbt.finalize_mut(&Secp256k1::verification_only())
             // Just display the first error
             .map_err(|e| CommandError::FailedToPostOriginalPayjoinProposal(e[0].to_string()))?;
+        let original_txid = psbt.unsigned_tx.compute_txid();
 
-        let persister = SenderPersister::new(Arc::new(self.db.clone()));
+        let persister = SenderPersister::new(Arc::new(self.db.clone()), &original_txid);
         log::info!("Saving new sender: {:?}", persister.session_id);
         let _sender = SenderBuilder::new(psbt.clone(), uri)
             .build_recommended(FeeRate::BROADCAST_MIN)
@@ -484,19 +485,12 @@ impl DaemonControl {
             }
         }
 
-        for session_id in db_conn.get_all_active_sender_session_ids() {
+        if let Some(session_id) = db_conn.get_payjoin_session_id_from_txid(txid) {
             log::info!("Checking sender session: {:?}", session_id);
             let persister = SenderPersister::from_id(Arc::new(self.db.clone()), session_id.clone());
-            let (state, history) = replay_sender_event_log(&persister).unwrap();
+            let (state, _) = replay_sender_event_log(&persister).unwrap();
             log::info!("Sender state: {:?}", state);
-            let original_txid = history.fallback_tx().map(|tx| tx.compute_txid());
-            if let Some(_original_txid) = original_txid {
-                // TODO: fix this
-                // if original_txid == *txid {
-                // TODO: this isnt a bip21, but a payjoin endpoint. Does this need to get returned?
-                return Ok(state.into());
-                // }
-            }
+            return Ok(state.into());
         }
 
         Ok(PayjoinStatus::Unknown)
