@@ -463,29 +463,14 @@ impl DaemonControl {
     pub fn get_payjoin_info(&self, txid: &bitcoin::Txid) -> Result<PayjoinStatus, CommandError> {
         let mut db_conn = self.db.connection();
         info!("Getting payjoin info for txid: {:?}", txid);
-        for session_id in db_conn.get_all_active_receiver_session_ids() {
+        if let Some(session_id) = db_conn.get_payjoin_receiver_session_id_from_txid(txid) {
             let persister =
                 ReceiverPersister::from_id(Arc::new(self.db.clone()), session_id.clone());
-            let (state, history) = replay_receiver_event_log(&persister).unwrap();
-            let original_txid = history.fallback_tx().map(|tx| tx.compute_txid());
-            info!("Original txid {:?}", original_txid);
-            let ready_to_sign_txid = history
-                .psbt_ready_for_signing()
-                .map(|psbt| psbt.unsigned_tx.compute_txid());
-            info!("Ready to sign txid {:?}", ready_to_sign_txid);
-            if let Some(ready_to_sign_txid) = ready_to_sign_txid {
-                if ready_to_sign_txid == *txid {
-                    return Ok(state.into());
-                }
-            }
-            if let Some(original_txid) = original_txid {
-                if original_txid == *txid {
-                    return Ok(state.into());
-                }
-            }
+            let (state, _) = replay_receiver_event_log(&persister).unwrap();
+            return Ok(state.into());
         }
 
-        if let Some(session_id) = db_conn.get_payjoin_session_id_from_txid(txid) {
+        if let Some(session_id) = db_conn.get_payjoin_sender_session_id_from_txid(txid) {
             log::info!("Checking sender session: {:?}", session_id);
             let persister = SenderPersister::from_id(Arc::new(self.db.clone()), session_id.clone());
             let (state, _) = replay_sender_event_log(&persister).unwrap();

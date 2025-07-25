@@ -1085,6 +1085,54 @@ impl SqliteConn {
         .expect("Db must not fail")
     }
 
+    /// Save original txid for a sender session
+    pub fn update_receiver_session_original_txid(
+        &mut self,
+        session_id: &SessionId,
+        original_txid: &bitcoin::Txid,
+    ) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "UPDATE payjoin_receivers SET original_txid = ?1 WHERE id = ?2",
+                rusqlite::params![original_txid[..].to_vec(), session_id.0],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    /// Save proposed txid for a sender session
+    pub fn update_receiver_session_proposed_txid(
+        &mut self,
+        session_id: &SessionId,
+        proposed_txid: &bitcoin::Txid,
+    ) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "UPDATE payjoin_receivers SET proposed_txid = ?1 WHERE id = ?2",
+                rusqlite::params![proposed_txid[..].to_vec(), session_id.0],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    /// Get receiver session id from txid -- this will return the session id if the txid is a proposed payjoin txid or the original txid
+    pub fn get_payjoin_receiver_session_id(&mut self, txid: &bitcoin::Txid) -> Option<SessionId> {
+        // TODO: This should always be one row.
+        let session_id = db_query(
+            &mut self.conn,
+            "SELECT id FROM payjoin_receivers WHERE proposed_txid = ?1 or original_txid = ?1",
+            rusqlite::params![txid[..].to_vec()],
+            |row| {
+                let id: i64 = row.get(0)?;
+                Ok(SessionId::new(id))
+            },
+        )
+        .expect("Db must not fail");
+        session_id.first().cloned()
+    }
+
     pub fn save_new_payjoin_sender_session(&mut self, original_txid: &bitcoin::Txid) -> i64 {
         let mut id = 0i64;
         db_exec(&mut self.conn, |db_tx| {
@@ -1167,7 +1215,7 @@ impl SqliteConn {
     /// Get the payjoin session id from a txid
     ///
     /// This will return the session id if the txid is a proposed payjoin txid or the original txid
-    pub fn get_payjoin_session_id_from_txid(&mut self, txid: &bitcoin::Txid) -> Option<SessionId> {
+    pub fn get_payjoin_sender_session_id(&mut self, txid: &bitcoin::Txid) -> Option<SessionId> {
         // TODO: This should always be one row.
         let session_id = db_query(
             &mut self.conn,

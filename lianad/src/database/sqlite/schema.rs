@@ -152,6 +152,8 @@ CREATE TABLE payjoin_sender_events (
 /* Payjoin receivers */
 CREATE TABLE payjoin_receivers (
     id INTEGER PRIMARY KEY NOT NULL,
+    original_txid BLOB,
+    proposed_txid BLOB,
     created_at INTEGER NOT NULL,
     completed_at INTEGER
 );
