@@ -113,7 +113,7 @@ fn address_card<'a>(
                             .on_press(Message::Select(row_index)),
                     )
                     .push(Space::with_width(Length::Fill))
-                    .push(if has_bip21 {
+                    .push(if maybe_bip21.is_some() {
                         button::secondary(None, "Show Bip21 QR Code")
                             .on_press(Message::ShowBip21QrCode(row_index))
                     } else {
