@@ -1085,12 +1085,12 @@ impl SqliteConn {
         .expect("Db must not fail")
     }
 
-    pub fn save_new_payjoin_sender_session(&mut self) -> i64 {
+    pub fn save_new_payjoin_sender_session(&mut self, original_txid: &bitcoin::Txid) -> i64 {
         let mut id = 0i64;
         db_exec(&mut self.conn, |db_tx| {
             db_tx.execute(
-                "INSERT INTO payjoin_senders (created_at) VALUES (?1)",
-                rusqlite::params![curr_timestamp()],
+                "INSERT INTO payjoin_senders (created_at, original_txid) VALUES (?1, ?2)",
+                rusqlite::params![curr_timestamp(), original_txid[..].to_vec()],
             )?;
             id = db_tx.last_insert_rowid();
             Ok(())
@@ -1146,6 +1146,40 @@ impl SqliteConn {
             },
         )
         .expect("Db must not fail")
+    }
+
+    /// Save the proposed txid for a sender session
+    pub fn save_proposed_payjoin_txid(
+        &mut self,
+        session_id: &SessionId,
+        proposed_txid: &bitcoin::Txid,
+    ) {
+        db_exec(&mut self.conn, |db_tx| {
+            db_tx.execute(
+                "UPDATE payjoin_senders SET proposed_txid = ?1 WHERE id = ?2",
+                rusqlite::params![proposed_txid[..].to_vec(), session_id.0],
+            )?;
+            Ok(())
+        })
+        .expect("Db must not fail");
+    }
+
+    /// Get the payjoin session id from a txid
+    ///
+    /// This will return the session id if the txid is a proposed payjoin txid or the original txid
+    pub fn get_payjoin_session_id_from_txid(&mut self, txid: &bitcoin::Txid) -> Option<SessionId> {
+        // TODO: This should always be one row.
+        let session_id = db_query(
+            &mut self.conn,
+            "SELECT id FROM payjoin_senders WHERE proposed_txid = ?1 or original_txid = ?1",
+            rusqlite::params![txid[..].to_vec()],
+            |row| {
+                let id: i64 = row.get(0)?;
+                Ok(SessionId::new(id))
+            },
+        )
+        .expect("Db must not fail");
+        session_id.first().cloned()
     }
 }
 
@@ -3825,10 +3859,14 @@ CREATE TABLE labels (
     fn test_payjoin_sender_sessions() {
         let (temp_dir, _, _, db) = dummy_db();
         let mut conn = db.connection().unwrap();
+        let original_txid = bitcoin::Txid::from_str(
+            "0000000000000000000000000000000000000000000000000000000000000001",
+        )
+        .unwrap();
 
-        let session_id_1 = conn.save_new_payjoin_sender_session();
+        let session_id_1 = conn.save_new_payjoin_sender_session(&original_txid);
         assert!(session_id_1 > 0);
-        let session_id_2 = conn.save_new_payjoin_sender_session();
+        let session_id_2 = conn.save_new_payjoin_sender_session(&original_txid);
         assert!(session_id_2 > session_id_1);
 
         let active_sessions = conn.get_all_active_sender_session_ids();
@@ -3874,7 +3912,7 @@ CREATE TABLE labels (
         assert_eq!(empty_events.len(), 0);
 
         // Test session with no events
-        let session_id_3 = conn.save_new_payjoin_sender_session();
+        let session_id_3 = conn.save_new_payjoin_sender_session(&original_txid);
         let session_3 = SessionId::new(session_id_3);
         let no_events = conn.load_sender_session_events(&session_3);
         assert_eq!(no_events.len(), 0);
