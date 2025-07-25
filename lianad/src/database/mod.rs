@@ -206,6 +206,26 @@ pub trait DatabaseConnection {
     /// Save Receiver Session
     fn save_new_payjoin_receiver_session(&mut self) -> i64;
 
+    /// Save original txid for a receiver session
+    fn save_receiver_session_original_txid(
+        &mut self,
+        session_id: &SessionId,
+        original_txid: &bitcoin::Txid,
+    );
+
+    /// Save proposed txid for a receiver session
+    fn save_receiver_session_proposed_txid(
+        &mut self,
+        session_id: &SessionId,
+        proposed_txid: &bitcoin::Txid,
+    );
+
+    /// Get receiver session id from txid -- this will return the session id if the txid is a proposed payjoin txid or the original txid
+    fn get_payjoin_receiver_session_id_from_txid(
+        &mut self,
+        txid: &bitcoin::Txid,
+    ) -> Option<SessionId>;
+
     /// Get all Receiver Sessions
     fn get_all_active_receiver_session_ids(&mut self) -> Vec<SessionId>;
 
@@ -237,7 +257,10 @@ pub trait DatabaseConnection {
     fn save_proposed_payjoin_txid(&mut self, session_id: &SessionId, proposed_txid: &bitcoin::Txid);
 
     /// Get payjoin session id from txid -- this will return the session id if the txid is a proposed payjoin txid or the original txid
-    fn get_payjoin_session_id_from_txid(&mut self, txid: &bitcoin::Txid) -> Option<SessionId>;
+    fn get_payjoin_sender_session_id_from_txid(
+        &mut self,
+        txid: &bitcoin::Txid,
+    ) -> Option<SessionId>;
 }
 
 impl DatabaseConnection for SqliteConn {
@@ -477,6 +500,29 @@ impl DatabaseConnection for SqliteConn {
         self.get_all_active_receiver_session_ids()
     }
 
+    fn save_receiver_session_original_txid(
+        &mut self,
+        session_id: &SessionId,
+        original_txid: &bitcoin::Txid,
+    ) {
+        self.update_receiver_session_original_txid(session_id, original_txid)
+    }
+
+    fn save_receiver_session_proposed_txid(
+        &mut self,
+        session_id: &SessionId,
+        proposed_txid: &bitcoin::Txid,
+    ) {
+        self.update_receiver_session_proposed_txid(session_id, proposed_txid)
+    }
+
+    fn get_payjoin_receiver_session_id_from_txid(
+        &mut self,
+        txid: &bitcoin::Txid,
+    ) -> Option<SessionId> {
+        self.get_payjoin_receiver_session_id(txid)
+    }
+
     fn save_receiver_session_event(&mut self, session_id: &SessionId, event: Vec<u8>) {
         self.save_receiver_session_event(session_id, event)
     }
@@ -517,8 +563,11 @@ impl DatabaseConnection for SqliteConn {
         self.save_proposed_payjoin_txid(session_id, proposed_txid)
     }
 
-    fn get_payjoin_session_id_from_txid(&mut self, txid: &bitcoin::Txid) -> Option<SessionId> {
-        self.get_payjoin_session_id_from_txid(txid)
+    fn get_payjoin_sender_session_id_from_txid(
+        &mut self,
+        txid: &bitcoin::Txid,
+    ) -> Option<SessionId> {
+        self.get_payjoin_sender_session_id(txid)
     }
 }
 
