@@ -8,14 +8,14 @@ use miniscript::{
 use payjoin::{bitcoin::Amount, IntoUrl, OhttpKeys};
 use reqwest::{header::ACCEPT, Proxy};
 
-pub const OHTTP_RELAY: &str = "https://pj.bobspacebkk.com";
+pub(crate) const OHTTP_RELAY: &str = "https://pj.bobspacebkk.com";
 
-pub fn http_agent() -> reqwest::blocking::Client {
+pub(crate) fn http_agent() -> reqwest::blocking::Client {
     reqwest::blocking::Client::new()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FetchOhttpKeysError {
+pub(crate) enum FetchOhttpKeysError {
     Reqwest(String),
     InvalidOhttpKeys(String),
     InvalidUrl(String),
@@ -30,7 +30,7 @@ impl std::fmt::Display for FetchOhttpKeysError {
     }
 }
 
-pub fn fetch_ohttp_keys(
+pub(crate) fn fetch_ohttp_keys(
     ohttp_relay: impl IntoUrl,
     payjoin_directory: impl IntoUrl,
 ) -> Result<OhttpKeys, FetchOhttpKeysError> {
@@ -75,7 +75,9 @@ fn validate_ohttp_keys_response(
     }
 }
 
-pub fn post_request(req: payjoin::Request) -> Result<reqwest::blocking::Response, reqwest::Error> {
+pub(crate) fn post_request(
+    req: payjoin::Request,
+) -> Result<reqwest::blocking::Response, reqwest::Error> {
     let http = http_agent();
     http.post(req.url)
         .header("Content-Type", req.content_type)
@@ -84,7 +86,7 @@ pub fn post_request(req: payjoin::Request) -> Result<reqwest::blocking::Response
         .send()
 }
 
-pub fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>) {
+pub(crate) fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>) {
     let mut witness_utxo_to_clean = vec![];
     let mut inputs_to_finalize = vec![];
     for (index, input) in psbt.inputs.iter_mut().enumerate() {
