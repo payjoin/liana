@@ -10,7 +10,7 @@ use crate::{
     miniscript::bitcoin::absolute::LockTime,
     payjoin::{
         db::{ReceiverPersister, SenderPersister},
-        helpers::{fetch_ohttp_keys, FetchOhttpKeysError, OHTTP_RELAY},
+        helpers::{fetch_ohttp_keys, FetchOhttpKeysError, OHTTP_RELAY, PAYJOIN_DIRECTORY},
         types::PayjoinStatus,
     },
     poller::PollerMessage,
@@ -385,15 +385,14 @@ impl DaemonControl {
     pub fn receive_payjoin(&self) -> Result<GetAddressResult, CommandError> {
         let mut db_conn = self.db.connection();
 
-        let directory = "https://payjo.in";
-
         let ohttp_keys = if let Some(entry) = db_conn.payjoin_get_ohttp_keys(OHTTP_RELAY) {
             entry.1
         } else {
-            let ohttp_keys = std::thread::spawn(move || fetch_ohttp_keys(OHTTP_RELAY, directory))
-                .join()
-                .unwrap()
-                .map_err(CommandError::FailedToFetchOhttpKeys)?;
+            let ohttp_keys =
+                std::thread::spawn(move || fetch_ohttp_keys(OHTTP_RELAY, PAYJOIN_DIRECTORY))
+                    .join()
+                    .unwrap()
+                    .map_err(CommandError::FailedToFetchOhttpKeys)?;
             db_conn.payjoin_save_ohttp_keys(OHTTP_RELAY, ohttp_keys.clone());
             ohttp_keys
         };
@@ -413,7 +412,7 @@ impl DaemonControl {
         let persister = ReceiverPersister::new(Arc::new(self.db.clone()));
         let session = Receiver::<UninitializedReceiver>::create_session(
             address.clone(),
-            directory,
+            PAYJOIN_DIRECTORY,
             ohttp_keys.clone(),
             None,
         )
