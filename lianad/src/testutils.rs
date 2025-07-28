@@ -587,7 +587,7 @@ impl DatabaseConnection for DummyDatabase {
             .map(|id| SessionId(*id))
             .collect()
     }
-    fn save_new_payjoin_sender_session(&mut self) -> i64 {
+    fn save_new_payjoin_sender_session(&mut self, _txid: &bitcoin::Txid) -> i64 {
         let id = self
             .db
             .read()
@@ -689,6 +689,44 @@ impl DatabaseConnection for DummyDatabase {
             .entry(session_id.0)
             .or_insert(PayjoinSession { completed: false })
             .completed = true;
+    }
+
+    fn save_receiver_session_original_txid(
+        &mut self,
+        _session_id: &SessionId,
+        _original_txid: &bitcoin::Txid,
+    ) {
+        todo!()
+    }
+
+    fn save_receiver_session_proposed_txid(
+        &mut self,
+        _session_id: &SessionId,
+        _proposed_txid: &bitcoin::Txid,
+    ) {
+        todo!()
+    }
+
+    fn get_payjoin_receiver_session_id_from_txid(
+        &mut self,
+        _txid: &bitcoin::Txid,
+    ) -> Option<SessionId> {
+        todo!()
+    }
+
+    fn save_proposed_payjoin_txid(
+        &mut self,
+        _session_id: &SessionId,
+        _proposed_txid: &bitcoin::Txid,
+    ) {
+        todo!()
+    }
+
+    fn get_payjoin_sender_session_id_from_txid(
+        &mut self,
+        _txid: &bitcoin::Txid,
+    ) -> Option<SessionId> {
+        todo!()
     }
 }
 
