@@ -15,7 +15,7 @@ pub(crate) fn http_agent() -> reqwest::blocking::Client {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum FetchOhttpKeysError {
+pub enum FetchOhttpKeysError {
     Reqwest(String),
     InvalidOhttpKeys(String),
     InvalidUrl(String),
