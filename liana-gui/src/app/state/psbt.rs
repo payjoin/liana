@@ -188,7 +188,7 @@ impl PsbtState {
                 self.modal = Some(PsbtModal::Delete(DeleteModal::default()));
             }
             Message::View(view::Message::Spend(view::SpendTxMessage::SendPayjoin)) => {
-                let modal = SendPayjoinModal::new();
+                let modal = SendPayjoinModal;
                 let cmd = modal.load(daemon);
                 self.modal = Some(PsbtModal::SendPayjoin(modal));
                 return cmd;
@@ -331,15 +331,7 @@ impl PsbtState {
 }
 
 #[derive(Default)]
-pub struct SendPayjoinModal {
-    _error: Option<Error>,
-}
-
-impl SendPayjoinModal {
-    pub fn new() -> Self {
-        Self { _error: None }
-    }
-}
+pub struct SendPayjoinModal;
 
 impl Modal for SendPayjoinModal {
     fn view<'a>(&'a self, content: Element<'a, view::Message>) -> Element<'a, view::Message> {
