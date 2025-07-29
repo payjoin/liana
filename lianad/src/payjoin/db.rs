@@ -64,7 +64,6 @@ impl SessionPersister for ReceiverPersister {
         event: &Self::SessionEvent,
     ) -> std::result::Result<(), Self::InternalStorageError> {
         let mut db_conn = self.db.connection();
-        // serilize event
         let event_ser = serde_json::to_vec(event).map_err(PersisterError::Serialize)?;
         db_conn.save_receiver_session_event(&self.session_id, event_ser);
         Ok(())
@@ -76,11 +75,10 @@ impl SessionPersister for ReceiverPersister {
     {
         let mut db_conn = self.db.connection();
         let events = db_conn.load_receiver_session_events(&self.session_id);
-        let deserialized_events: Result<Vec<_>, _> = events
+        let iter = events
             .into_iter()
-            .map(|event| serde_json::from_slice(&event).map_err(PersisterError::Deserialize))
-            .collect();
-        Ok(Box::new(deserialized_events?.into_iter()))
+            .map(|event| serde_json::from_slice(&event).expect("Event to be serialized correctly"));
+        Ok(Box::new(iter))
     }
 
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
@@ -120,7 +118,6 @@ impl SessionPersister for SenderPersister {
         event: &Self::SessionEvent,
     ) -> std::result::Result<(), Self::InternalStorageError> {
         let mut db_conn = self.db.connection();
-        // serilize event
         let event_ser = serde_json::to_vec(event).map_err(PersisterError::Serialize)?;
         db_conn.save_sender_session_event(&self.session_id, event_ser);
         Ok(())
@@ -132,11 +129,10 @@ impl SessionPersister for SenderPersister {
     {
         let mut db_conn = self.db.connection();
         let events = db_conn.get_all_sender_session_events(&self.session_id);
-        let deserialized_events: Result<Vec<_>, _> = events
+        let iter = events
             .into_iter()
-            .map(|event| serde_json::from_slice(&event).map_err(PersisterError::Deserialize))
-            .collect();
-        Ok(Box::new(deserialized_events?.into_iter()))
+            .map(|event| serde_json::from_slice(&event).expect("Event to be serialized correctly"));
+        Ok(Box::new(iter))
     }
 
     fn close(&self) -> std::result::Result<(), Self::InternalStorageError> {
