@@ -18,7 +18,7 @@ impl SessionId {
 }
 
 #[derive(Debug)]
-pub enum PersisterError {
+pub(crate) enum PersisterError {
     Serialize(serde_json::Error),
     Deserialize(serde_json::Error),
     NotFound(String),
@@ -37,7 +37,7 @@ impl Display for PersisterError {
 impl std::error::Error for PersisterError {}
 
 #[derive(Clone)]
-pub struct ReceiverPersister {
+pub(crate) struct ReceiverPersister {
     db: Arc<dyn DatabaseInterface>,
     pub session_id: SessionId,
 }
@@ -93,7 +93,7 @@ impl SessionPersister for ReceiverPersister {
 }
 
 #[derive(Clone)]
-pub struct SenderPersister {
+pub(crate) struct SenderPersister {
     db: Arc<dyn DatabaseInterface>,
     pub session_id: SessionId,
 }
