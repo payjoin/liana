@@ -21,7 +21,6 @@ impl SessionId {
 pub(crate) enum PersisterError {
     Serialize(serde_json::Error),
     Deserialize(serde_json::Error),
-    NotFound(String),
 }
 
 impl Display for PersisterError {
@@ -29,7 +28,6 @@ impl Display for PersisterError {
         match self {
             PersisterError::Serialize(e) => write!(f, "Serialization failed: {e}"),
             PersisterError::Deserialize(e) => write!(f, "Deserialization failed: {e}"),
-            PersisterError::NotFound(key) => write!(f, "Key not found: {key}"),
         }
     }
 }
