@@ -196,7 +196,7 @@ impl PsbtState {
             Message::View(view::Message::Spend(view::SpendTxMessage::PayjoinInitiated)) => {
                 self.tx.status = SpendStatus::PayjoinInitiated;
                 self.modal = None;
-                if let Some(_payjoin_info) = self.tx.payjoin_status.clone() {
+                if let Some(_payjoin_info) = self.tx.payjoin_status {
                     let psbt = self.tx.psbt.clone();
                     // TODO: should this be an error?
                     let bip21 = self.bip21.clone().expect("bip21 should be set");

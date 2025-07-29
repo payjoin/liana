@@ -252,7 +252,6 @@ fn finalize_proposal(
     db_conn: &mut Box<dyn DatabaseConnection>,
     secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>,
 ) -> Result<(), Box<dyn Error>> {
-    let proposal = proposal;
     let (_, session_history) = replay_event_log(persister)?;
     let psbt = session_history
         .psbt_ready_for_signing()

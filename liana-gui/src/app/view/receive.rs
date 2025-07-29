@@ -84,7 +84,7 @@ fn address_card<'a>(
                                 Column::new()
                                     .push(Space::with_height(Length::Fixed(10.0)))
                                     .push(
-                                        p2_regular(&bip21.to_string())
+                                        p2_regular(bip21.to_string())
                                             .small()
                                             .style(theme::text::secondary),
                                     )
