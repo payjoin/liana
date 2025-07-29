@@ -604,7 +604,6 @@ impl Step for DefineSpend {
                     }
 
                     view::CreateSpendMessage::Bip21Edited(i, bip21) => {
-                        log::info!("Bip21Edited: {}", bip21);
                         if let Some(recipient) = self.recipients.get_mut(i) {
                             recipient.bip21.value = bip21.clone();
                             if let Ok(uri) = Uri::try_from(bip21.as_str()) {
@@ -620,7 +619,6 @@ impl Step for DefineSpend {
                                     );
                                 }
                                 if let Some(amount) = uri.amount {
-                                    log::info!("Amount: {}", amount);
                                     recipient.amount.value =
                                         amount.to_string_in(Denomination::Bitcoin);
                                     recipient.update(
@@ -948,7 +946,6 @@ impl Recipient {
                 self.label.value = label;
             }
             view::CreateSpendMessage::Bip21Edited(_, bip21) => {
-                log::info!("bip21: {}", bip21);
                 self.bip21.value = bip21;
             }
             _ => {}

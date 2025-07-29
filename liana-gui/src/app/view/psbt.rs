@@ -481,7 +481,7 @@ pub fn signatures<'a>(
                         .push(p1_bold("Status"))
                         .push(icon::circle_check_icon().style(theme::text::payjoin))
                         .push(
-                            text("Payjoin Proposal Ready")
+                            text("Payjoin Proposal Ready For Signing")
                                 .bold()
                                 .style(theme::text::payjoin),
                         ),

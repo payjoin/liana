@@ -906,7 +906,6 @@ impl DaemonControl {
         // effort basis.
         let txid = tx.compute_txid();
         if let Some(mut db_psbt) = db_conn.spend_tx(&txid) {
-            info!("Updating spend: {:?}", txid);
             let db_tx = db_psbt.unsigned_tx.clone();
             for i in 0..db_tx.input.len() {
                 if tx
