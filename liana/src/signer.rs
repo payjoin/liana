@@ -385,7 +385,6 @@ impl HotSigner {
                     &mut psbt.inputs[i],
                     i,
                 )?;
-                log::info!("Signed input at {}", i);
             } else {
                 self.sign_taproot(
                     secp,
