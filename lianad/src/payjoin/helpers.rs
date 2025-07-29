@@ -87,6 +87,8 @@ pub(crate) fn post_request(
         .send()
 }
 
+/// Optimistically attempt to create witness for all inputs.
+/// This method will not fail even if some inputs are not finalized or include invalid partial signatures.
 pub(crate) fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256k1::VerifyOnly>) {
     let mut witness_utxo_to_clean = vec![];
     let mut inputs_to_finalize = vec![];
@@ -117,8 +119,8 @@ pub(crate) fn finalize_psbt(psbt: &mut Psbt, secp: &secp256k1::Secp256k1<secp256
 
     for index in &inputs_to_finalize {
         match psbt.finalize_inp_mut(secp, *index) {
-            Ok(_) => log::info!("[Payjoin] Finalizing input at: {}", index),
-            Err(e) => log::warn!("[Payjoin] Failed to finalize input at: {} | {}", index, e),
+            Ok(_) => log::info!("Finalizing input at: {}", index),
+            Err(e) => log::warn!("Failed to finalize input at: {} | {}", index, e),
         }
     }
 
