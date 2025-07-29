@@ -354,7 +354,7 @@ fn process_receiver_session(
     Ok(())
 }
 
-pub fn payjoin_receiver_check(
+pub(crate) fn payjoin_receiver_check(
     db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>,
     bit: &mut sync::Arc<sync::Mutex<dyn BitcoinInterface>>,
     desc: &descriptors::LianaDescriptor,

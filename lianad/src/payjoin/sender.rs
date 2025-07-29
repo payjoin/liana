@@ -89,7 +89,7 @@ fn process_sender_session(
     }
 }
 
-pub fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) {
+pub(crate) fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterface>>) {
     let mut db_conn = db.connection();
     for session_id in db_conn.get_all_active_sender_session_ids() {
         let persister = SenderPersister::from_id(Arc::new(db.clone()), session_id.clone());
