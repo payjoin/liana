@@ -20,14 +20,12 @@ impl SessionId {
 #[derive(Debug)]
 pub(crate) enum PersisterError {
     Serialize(serde_json::Error),
-    Deserialize(serde_json::Error),
 }
 
 impl Display for PersisterError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             PersisterError::Serialize(e) => write!(f, "Serialization failed: {e}"),
-            PersisterError::Deserialize(e) => write!(f, "Deserialization failed: {e}"),
         }
     }
 }
