@@ -728,6 +728,10 @@ impl DatabaseConnection for DummyDatabase {
     ) -> Option<SessionId> {
         todo!()
     }
+
+    fn insert_input_seen_before(&mut self, _outpoints: &[bitcoin::OutPoint]) -> bool {
+        todo!()
+    }
 }
 
 pub struct DummyLiana {
