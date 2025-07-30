@@ -2,7 +2,6 @@ use crate::database::DatabaseInterface;
 
 use crate::payjoin::helpers::post_request;
 
-use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{self, Arc};
 
@@ -116,27 +115,10 @@ pub(crate) fn payjoin_sender_check(db: &sync::Arc<sync::Mutex<dyn DatabaseInterf
 
         match process_sender_session(state, &persister) {
             Ok(Some(proposal_psbt)) => {
-                let mut proposal_psbt = proposal_psbt;
-                // TODO(arturgontijo): PDK removes fields that we need in the GUI to properly sign the inputs
-                let mut input_fields_to_restore = HashMap::new();
-                for (index, txin) in original_psbt.unsigned_tx.input.iter().enumerate() {
-                    let mut input_without_sigs = original_psbt.inputs[index].clone();
-                    input_without_sigs.partial_sigs = Default::default();
-                    input_fields_to_restore.insert(txin.previous_output, input_without_sigs);
-                }
                 let original_txid = original_psbt.unsigned_tx.compute_txid();
                 // TODO: should we be deleting the original psbt?  can we fallback without it?
                 log::info!("[Payjoin] Deleting original Payjoin psbt (txid={original_txid})");
                 db_conn.delete_spend(&original_txid);
-
-                // Restoring witness_scripts and bip32_derivation so GUI can sign them
-                for (index, psbtin) in proposal_psbt.inputs.iter_mut().enumerate() {
-                    let outpoint = &proposal_psbt.unsigned_tx.input[index].previous_output;
-                    if let Some(input) = input_fields_to_restore.get(outpoint) {
-                        *psbtin = input.clone();
-                    }
-                }
-
                 let new_txid = proposal_psbt.unsigned_tx.compute_txid();
                 if db_conn.spend_tx(&new_txid).is_some() {
                     log::info!("[Payjoin] Proposal already exists in the db");
