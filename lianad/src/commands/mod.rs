@@ -440,15 +440,21 @@ impl DaemonControl {
             .map_err(|_| "URI does not support Payjoin".to_string())
             .unwrap();
 
-        let mut psbt = psbt.clone();
-        psbt.finalize_mut(&Secp256k1::verification_only())
+        let mut signed_psbt = psbt.clone();
+        signed_psbt
+            .finalize_mut(&Secp256k1::verification_only())
             // Just display the first error
             .map_err(|e| CommandError::FailedToPostOriginalPayjoinProposal(e[0].to_string()))?;
-        let original_txid = psbt.unsigned_tx.compute_txid();
 
+        let mut original_psbt = psbt.clone();
+        for (index, input) in original_psbt.inputs.iter_mut().enumerate() {
+            input.partial_sigs = Default::default();
+            input.final_script_witness = signed_psbt.inputs[index].final_script_witness.clone();
+        }
+
+        let original_txid = original_psbt.unsigned_tx.compute_txid();
         let persister = SenderPersister::new(Arc::new(self.db.clone()), &original_txid);
-        log::info!("Saving new sender: {:?}", persister.session_id);
-        let _sender = SenderBuilder::new(psbt.clone(), uri)
+        let _sender = SenderBuilder::new(original_psbt.clone(), uri)
             .build_recommended(FeeRate::BROADCAST_MIN)
             .save(&persister)
             .unwrap();
